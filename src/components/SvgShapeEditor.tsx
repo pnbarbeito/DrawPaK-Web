@@ -150,7 +150,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
       const svgStr = serializer.serializeToString(clone);
       const handles = shapes.flatMap(s => s.handles.map(h => ({ id: h.id, x: h.x, y: h.y, type: h.type })));
       onChange({ svg: svgStr, handles });
-  } catch {
+    } catch {
       const svgStr = svgRef.current.outerHTML;
       // fallback: try to remove editor handles from original DOM before serializing
       try {
@@ -343,10 +343,10 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
     setShapes(prev => prev.map(s => {
       if (s.id !== selected) return s;
       const hid = `h_${Date.now()}`;
-  let hx = 0, hy = 0;
-  if (s.type === 'rect') { hx = snap(s.x + s.w / 2); hy = snap(s.y + s.h / 2); }
-  else if (s.type === 'circle' || s.type === 'semicircle') { hx = snap((s as CircleShape | SemiCircleShape).x); hy = snap((s as CircleShape | SemiCircleShape).y); }
-  else if (s.type === 'line') { hx = snap((s.x1 + s.x2) / 2); hy = snap((s.y1 + s.y2) / 2); }
+      let hx = 0, hy = 0;
+      if (s.type === 'rect') { hx = snap(s.x + s.w / 2); hy = snap(s.y + s.h / 2); }
+      else if (s.type === 'circle' || s.type === 'semicircle') { hx = snap((s as CircleShape | SemiCircleShape).x); hy = snap((s as CircleShape | SemiCircleShape).y); }
+      else if (s.type === 'line') { hx = snap((s.x1 + s.x2) / 2); hy = snap((s.y1 + s.y2) / 2); }
       return { ...s, handles: [...(s.handles || []), { id: hid, x: hx, y: hy, type: 'source' }] };
     }));
   };
@@ -372,10 +372,10 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
     dragStartPos.current = { x: e.clientX, y: e.clientY };
     dragStartTime.current = Date.now();
 
-  setSelected(shape.id);
-  // offset for move
-  if (shape.type === 'rect') updateDragState({ mode: 'move', shapeId: shape.id, offsetX: svgP.x - shape.x, offsetY: svgP.y - shape.y });
-  else if (shape.type === 'circle' || shape.type === 'semicircle') updateDragState({ mode: 'move', shapeId: shape.id, offsetX: svgP.x - (shape as CircleShape | SemiCircleShape).x, offsetY: svgP.y - (shape as CircleShape | SemiCircleShape).y });
+    setSelected(shape.id);
+    // offset for move
+    if (shape.type === 'rect') updateDragState({ mode: 'move', shapeId: shape.id, offsetX: svgP.x - shape.x, offsetY: svgP.y - shape.y });
+    else if (shape.type === 'circle' || shape.type === 'semicircle') updateDragState({ mode: 'move', shapeId: shape.id, offsetX: svgP.x - (shape as CircleShape | SemiCircleShape).x, offsetY: svgP.y - (shape as CircleShape | SemiCircleShape).y });
     else if (shape.type === 'line') {
       // For lines, we need a reference point. Let's use x1, y1 as the anchor for the offset.
       updateDragState({ mode: 'move', shapeId: shape.id, offsetX: svgP.x - shape.x1, offsetY: svgP.y - shape.y1 });
@@ -433,7 +433,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
       }
 
       if (currentDrag?.mode === 'move') {
-          if (s.type === 'rect') {
+        if (s.type === 'rect') {
           const newX = snap(svgP.x - (currentDrag.offsetX || 0));
           const newY = snap(svgP.y - (currentDrag.offsetY || 0));
           return { ...s, x: newX, y: newY } as RectShape;
@@ -469,7 +469,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
         return { ...s, x: nx, y: ny, w: nw, h: nh } as RectShape;
       }
       // resize handling for circle radius
-  if (currentDrag?.mode === 'resize' && (s.type === 'circle' || s.type === 'semicircle')) {
+      if (currentDrag?.mode === 'resize' && (s.type === 'circle' || s.type === 'semicircle')) {
         const cs = s as CircleShape;
         if (currentDrag.corner === 'radius') {
           const dx = svgP.x - cs.x;
@@ -496,7 +496,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
         }
       }
       // resize handling for circle radius
-  if (currentDrag?.mode === 'resize' && (s.type === 'circle' || s.type === 'semicircle')) {
+      if (currentDrag?.mode === 'resize' && (s.type === 'circle' || s.type === 'semicircle')) {
         const cs = s as CircleShape;
         if (currentDrag.corner === 'radius') {
           // compute new radius based on mouse distance to center
@@ -616,8 +616,8 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
 
     // cleanup global listeners immediately to avoid window handlers running after SVG up
     if (windowListenersAttached.current) {
-  try { window.removeEventListener('mousemove', handleWindowMouseMove); } catch { /* ignore */ }
-  try { window.removeEventListener('mouseup', handleWindowMouseUp); } catch { /* ignore */ }
+      try { window.removeEventListener('mousemove', handleWindowMouseMove); } catch { /* ignore */ }
+      try { window.removeEventListener('mouseup', handleWindowMouseUp); } catch { /* ignore */ }
       windowListenersAttached.current = false;
     }
 
@@ -773,7 +773,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
       </Box>
 
       <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        <Box sx={{ border: '1px solid #ddd', width: canvasWidth * effectiveDisplayScale + 5, height: canvasHeight * effectiveDisplayScale + 5, overflow: 'auto' }}>
+        <Box sx={{ border: '1px solid #ddd', width: (canvasWidth + 1) * effectiveDisplayScale, height: (canvasHeight + 5) * effectiveDisplayScale, overflow: 'auto' }}>
           <svg
             ref={svgRef}
             // visual size is scaled, user draws in logical coordinates via viewBox

@@ -108,9 +108,9 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
 
   if (loading) {
     return (
-      <Box style={{ position: 'absolute', left: 12, top: 72, width: 160, background: '#f5f5f5', padding: 8, borderRadius: 6, zIndex: 1200 }}>
-        <Typography variant="h6" sx={{ width: '100%', textAlign: 'center', fontSize: 14, fontWeight: 600, mb: 1 }}>Paleta</Typography>
-        <Typography variant="body2" style={{ fontSize: 12, color: '#666' }}>
+      <Box sx={{ position: 'absolute', left: 12, top: 72, width: 160, background: 'rgba(0, 0, 0, 0.6)', p: 1, borderRadius: 1, zIndex: 1200 }}>
+        <Typography variant="h6" sx={{ width: '100%', textAlign: 'center', fontSize: 14, fontWeight: 600, mb: 1, color:'white' }}>Paleta</Typography>
+        <Typography variant="body2" sx={{ fontSize: 12, color: '#fff' }}>
           Cargando elementos...
         </Typography>
       </Box>
@@ -118,51 +118,54 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
   }
 
   return (
-    <Box style={{ position: 'absolute', left: 12, top: 72, width: 160, background: '#f5f5f5', padding: 8, borderRadius: 6, zIndex: 1200 }}>
-      <Typography variant="h6" style={{ width: '100%', textAlign: 'center', fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
+    <Box sx={{ position: 'absolute', left: 12, top: 72, width: 200, background: 'rgba(0, 0, 0, 0.6)', p: 2, borderRadius: 6, zIndex: 1200, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 96px)' }}>
+      <Typography variant="h6" sx={{ width: '100%', textAlign: 'center', fontSize: 14, fontWeight: 600, mb: 1, color: '#fff' }}>
         Paleta
       </Typography>
-      <Box style={{ marginTop: 8 }}>
+      <Box sx={{ mt: 1, flex: 1, minHeight: 0, overflowY: 'auto', pr: 1 }}>
         {Object.keys(elementsByCategory).length === 0 ? (
-          <Typography variant="body2" style={{ fontSize: 12, color: '#666' }}>
+          <Typography variant="body2" sx={{ fontSize: 12, color: '#fff' }}>
             No hay elementos disponibles. Crea algunos elementos SVG.
           </Typography>
         ) : (
           Object.entries(elementsByCategory).map(([category, elements]) => (
-            <Accordion key={category} defaultExpanded={category === 'transformadores'} style={{ marginBottom: 8 }}>
+            <Accordion key={category} defaultExpanded={category === 'transformadores'} sx={{ marginBottom: 1,backgroundColor: 'rgba(0, 0, 0, 0.6)', color: '#fff' }}>
               <AccordionSummary
-                expandIcon={<ExpandMoreIcon />}
-                style={{
+                expandIcon={<ExpandMoreIcon sx={{color:'white'}}/>}
+                sx={{
                   padding: '4px 8px',
-                  minHeight: '32px'
+                  minHeight: '32px',
+                  color: '#fff',
+                  borderRadius: '4px',
                 }}
               >
-                <Box style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Typography variant="body2" style={{ fontSize: 12, fontWeight: 600 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, }}>
+                  <Typography variant="body2" sx={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>
                     {getCategoryDisplayName(category)}
                   </Typography>
                 </Box>
               </AccordionSummary>
-              <AccordionDetails style={{ padding: '8px 0' }}>
-                <Box style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <AccordionDetails sx={{ padding: '8px 0' }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   {elements.map((element) => {
                     return (
                       <Box
                         key={element.id}
                         draggable
                         onDragStart={(e) => onDragStart(e, getSymbolKeyForElement(element), element)}
-                        style={{
+                        sx={{
                           display: 'flex',
                           alignItems: 'center',
-                          gap: 6,
+                          gap: 1,
                           cursor: 'grab',
-                          padding: 4,
+                          p: 0.5,
                           border: '1px solid #ddd',
-                          borderRadius: 4,
-                          background: '#fff'
+                          borderRadius: 1,
+                          background: 'rgba(0, 0, 0, 0.6)',
+                          color: '#fff'
                         }}
                       >
-                        <Box style={{
+                        <Box sx={{
                           width: 48,
                           height: 48,
                           display: 'flex',
@@ -171,7 +174,7 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
                           overflow: 'hidden',
                           backgroundColor: '#fff',
                           border: '1px solid #eee',
-                          borderRadius: 4
+                          borderRadius: 1
                         }}>
                           <div
                             dangerouslySetInnerHTML={{
@@ -213,7 +216,7 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
                             }}
                           />
                         </Box>
-                        <Box style={{ fontSize: 10, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <Box sx={{ fontSize: 10, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {element.name}
                         </Box>
                       </Box>

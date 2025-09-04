@@ -151,6 +151,12 @@ function FlowApp(): React.ReactElement {
     const [exportArea, setExportArea] = React.useState<{ x: number; y: number; width: number; height: number } | null>(null);
     const [isDrawingArea, setIsDrawingArea] = React.useState(false);
     const [areaStart, setAreaStart] = React.useState<{ x: number; y: number } | null>(null);
+    // Control para mostrar/ocultar el overlay de selección (podemos esconderlo temporalmente al exportar)
+    const [showSelectionOverlay, setShowSelectionOverlay] = React.useState(true);
+    // Tipo de export pendiente cuando se activa la selección de área: 'png' | 'pdf' | null
+    const [pendingExportType, setPendingExportType] = React.useState<'png' | 'pdf' | null>(null);
+    // Orientación para exportar a PDF cuando pendingExportType === 'pdf'
+    const [exportPDFOrientation, setExportPDFOrientation] = React.useState<'portrait' | 'landscape'>('portrait');
     const [showBackground, setShowBackground] = React.useState(true);
     const [lastSaved, setLastSaved] = React.useState<Date | null>(null);
 
@@ -1090,9 +1096,11 @@ function FlowApp(): React.ReactElement {
     }, [isSelectingExportArea, isDrawingArea]);
 
     // Función para iniciar la selección de área
-    const startAreaSelection = useCallback(() => {
+    const startAreaSelection = useCallback((forType: 'png' | 'pdf' | null = 'png') => {
+        setPendingExportType(forType);
         setIsSelectingExportArea(true);
         setExportArea(null);
+        setShowSelectionOverlay(true);
     }, []);
 
     // Función para cancelar la selección de área
@@ -1101,6 +1109,8 @@ function FlowApp(): React.ReactElement {
         setExportArea(null);
         setIsDrawingArea(false);
         setAreaStart(null);
+        setShowSelectionOverlay(true);
+        setPendingExportType(null);
     }, []);
 
     // Nueva función de exportación PNG con área seleccionada
@@ -1113,7 +1123,9 @@ function FlowApp(): React.ReactElement {
         try {
             // Capturar toda la viewport sin fondo de puntos
             // Inline exportWithoutBackground: toggle background off, await a frame, run export, restore background
+            // Ocultamos la cuadrícula y el overlay de selección antes de la captura
             setShowBackground(false);
+            setShowSelectionOverlay(false);
             await new Promise(resolve => requestAnimationFrame(resolve));
             let fullDataUrl: string | null = null;
             try {
@@ -1122,7 +1134,9 @@ function FlowApp(): React.ReactElement {
                     backgroundColor: '#ffffff'
                 });
             } finally {
+                // Restaurar UI
                 setShowBackground(true);
+                setShowSelectionOverlay(true);
             }
 
             if (!fullDataUrl) return;
@@ -1175,6 +1189,107 @@ function FlowApp(): React.ReactElement {
         }
     }, [exportArea, cancelAreaSelection]);
 
+    const exportSelectedAreaPDF = useCallback(async () => {
+        if (!exportArea || !reactFlowWrapper.current) {
+            alert('Primero selecciona un área para exportar');
+            return;
+        }
+
+        try {
+            // Ocultar UI
+            setShowBackground(false);
+            setShowSelectionOverlay(false);
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            let fullDataUrl: string | null = null;
+            try {
+                fullDataUrl = await toPng(reactFlowWrapper.current!, {
+                    cacheBust: true,
+                    backgroundColor: '#ffffff'
+                });
+            } finally {
+                setShowBackground(true);
+                setShowSelectionOverlay(true);
+            }
+
+            if (!fullDataUrl) return;
+
+            // Crop to selected area (similar to PNG flow)
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+
+            const ratio = window.devicePixelRatio || 1;
+            canvas.width = exportArea.width * ratio;
+            canvas.height = exportArea.height * ratio;
+            canvas.style.width = exportArea.width + 'px';
+            canvas.style.height = exportArea.height + 'px';
+            ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, exportArea.width, exportArea.height);
+
+            const img = new Image();
+            await new Promise<void>((resolve, reject) => {
+                img.onload = () => resolve();
+                img.onerror = reject;
+                img.src = fullDataUrl;
+            });
+
+            ctx.drawImage(
+                img,
+                exportArea.x, exportArea.y, exportArea.width, exportArea.height,
+                0, 0, exportArea.width, exportArea.height
+            );
+
+            const croppedDataUrl = canvas.toDataURL('image/png');
+
+            // Prepare PDF A4
+            // We'll use jsPDF with 'mm' units and fit the image into the chosen orientation while keeping aspect ratio
+            const orientation = exportPDFOrientation === 'landscape' ? 'landscape' : 'portrait';
+            // A4 size in mm
+            const A4_W_MM = 210;
+            const A4_H_MM = 297;
+            const pdfW = orientation === 'landscape' ? A4_H_MM : A4_W_MM;
+            const pdfH = orientation === 'landscape' ? A4_W_MM : A4_H_MM;
+
+            // Convert image pixel dimensions to mm assuming 96 DPI for CSS px (best-effort)
+            const cssPxPerInch = 96; // assumption
+            const pxToMm = (px: number) => (px * 25.4) / cssPxPerInch;
+
+            const imgW_mm = pxToMm(canvas.width / (window.devicePixelRatio || 1));
+            const imgH_mm = pxToMm(canvas.height / (window.devicePixelRatio || 1));
+
+            // Fit image into A4 while preserving aspect ratio
+            let drawW = pdfW;
+            let drawH = (imgH_mm * pdfW) / imgW_mm;
+            if (drawH > pdfH) {
+                drawH = pdfH;
+                drawW = (imgW_mm * pdfH) / imgH_mm;
+            }
+
+            const x = (pdfW - drawW) / 2;
+            const y = (pdfH - drawH) / 2;
+
+            const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation });
+            pdf.addImage(croppedDataUrl, 'PNG', x, y, drawW, drawH);
+
+            const arrayBuffer = pdf.output('arraybuffer');
+            const bytes = new Uint8Array(arrayBuffer);
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'diagram_a4.pdf';
+            a.click();
+            URL.revokeObjectURL(url);
+
+            cancelAreaSelection();
+        } catch (error) {
+            console.error('Error exporting selected area to PDF:', error);
+            alert('Error al exportar el área seleccionada a PDF');
+        }
+    }, [exportArea, exportPDFOrientation, cancelAreaSelection]);
+
     const onNodeDragStop = useCallback((_: React.MouseEvent, node: Node<ElectNodeData>) => {
         // Encontrar una posición libre para el nodo arrastrado
         const freePosition = findFreePosition(node.position as { x: number; y: number }, nodes, node.id);
@@ -1189,345 +1304,7 @@ function FlowApp(): React.ReactElement {
         setEdges((eds) => [...eds]);
     }, [setNodes, setEdges, nodes]);
 
-    // helper removed: dataUrlToUint8Array is not used in web build
-
-    // SavedSvgPreview moved into SvgEditorDialog
-
-    // Capture only the React Flow viewport by cloning it into an offscreen container.
-    // This keeps nodes and edges (connections) but excludes UI overlays like palettes, toolbars, etc.
-    const captureViewportDataUrl = async (): Promise<string | null> => {
-        if (!reactFlowWrapper.current) return null;
-
-        // prefer cloning the .react-flow root (it contains nodes and edges),
-        // fall back to viewport or wrapper
-        const original = (reactFlowWrapper.current.querySelector('.react-flow')
-            ?? reactFlowWrapper.current.querySelector('.react-flow__viewport')
-            ?? reactFlowWrapper.current) as HTMLElement | null;
-        if (!original) return null;
-
-        const rect = original.getBoundingClientRect();
-
-        // Deep clone the viewport
-        const clone = original.cloneNode(true) as HTMLElement;
-
-        // Helper: copy computed styles from original tree to cloned tree
-        const copyStylesRecursive = (src: Element, dst: Element) => {
-            try {
-                const s = window.getComputedStyle(src as Element);
-                (dst as HTMLElement).style.cssText = s.cssText || '';
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            } catch (e) {
-                // ignore
-            }
-            // copy SVG presentation attributes (stroke, fill) if present
-            try {
-                for (let i = 0; i < src.attributes.length; i++) {
-                    const attr = src.attributes[i];
-                    // For presentation attrs, ensure they exist on dst
-                    if (attr && attr.name && (attr.name === 'stroke' || attr.name === 'fill' || attr.name === 'stroke-width' || attr.name === 'd')) {
-                        try {
-                            dst.setAttribute(attr.name, attr.value); // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                        } catch (e) { /* ignore */ }
-                    }
-                }
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            } catch (e) {/* ignore */ }
-
-            const srcChildren = src.children || [];
-            const dstChildren = dst.children || [];
-            for (let i = 0; i < srcChildren.length; i++) {
-                const sChild = srcChildren[i] as Element | undefined;
-                const dChild = dstChildren[i] as Element | undefined;
-                if (sChild && dChild) copyStylesRecursive(sChild, dChild);
-            }
-        };
-
-        try {
-            copyStylesRecursive(original, clone);
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        } catch (e) {
-            // ignore copy errors
-        }
-
-        // Prepare offscreen container
-        const container = document.createElement('div');
-        container.style.position = 'fixed';
-        container.style.left = '-9999px';
-        container.style.top = '0';
-        container.style.width = rect.width + 'px';
-        container.style.height = rect.height + 'px';
-        container.style.overflow = 'visible';
-        container.style.background = 'transparent';
-
-        // Normalize clone sizing so html-to-image captures correctly
-        clone.style.width = rect.width + 'px';
-        clone.style.height = rect.height + 'px';
-        clone.style.maxWidth = 'none';
-        clone.style.maxHeight = 'none';
-
-        // Keep computed transform (scale/translate) so the visual layout matches
-        try {
-            const cs = window.getComputedStyle(original);
-            const transform = cs.transform;
-            if (transform && transform !== 'none') {
-                clone.style.transform = transform;
-                clone.style.transformOrigin = cs.transformOrigin || '0 0';
-            }
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        } catch (e) {
-            // ignore
-        }
-
-        container.appendChild(clone);
-        document.body.appendChild(container);
-
-        try {
-            // allow one animation frame for styles and SVG to settle
-            await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
-            const dataUrl = await toPng(clone as HTMLElement, {
-                cacheBust: true,
-                backgroundColor: '#ffffff'
-            });
-            return dataUrl;
-        } finally {
-            // cleanup
-            try {
-                document.body.removeChild(container); 
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            } catch (e) { /* ignore */ }
-        }
-    };
-
-    // Serialize renderer SVG (edges/nodes) with inline styles to an SVG data URL
-    const getSerializedSvgDataUrl = async (): Promise<string | null> => {
-        if (!reactFlowWrapper.current) return null;
-        const svgEl = (reactFlowWrapper.current.querySelector('.react-flow__renderer svg')
-            ?? reactFlowWrapper.current.querySelector('svg')) as SVGElement | null;
-        if (!svgEl) return null;
-
-        const clone = svgEl.cloneNode(true) as SVGElement;
-
-        const inlineStyles = (src: Element, dst: Element) => {
-            try {
-                const cs = window.getComputedStyle(src as Element);
-                let cssText = '';
-                for (let i = 0; i < cs.length; i++) {
-                    const prop = cs[i];
-                    const val = cs.getPropertyValue(prop);
-                    cssText += `${prop}:${val};`;
-                }
-                (dst as HTMLElement).setAttribute('style', cssText);
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            } catch (e) { /* ignore */ }
-            const sChildren = src.children || [];
-            const dChildren = dst.children || [];
-            for (let i = 0; i < sChildren.length; i++) {
-                const sC = sChildren[i] as Element | undefined;
-                const dC = dChildren[i] as Element | undefined;
-                if (sC && dC) inlineStyles(sC, dC);
-            }
-        };
-
-        try {
-            inlineStyles(svgEl, clone); // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        } catch (e) { /* ignore */ }
-
-        if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-        try {
-            const vb = svgEl.getAttribute('viewBox');
-            if (vb && !clone.getAttribute('viewBox')) clone.setAttribute('viewBox', vb);
-            const w = svgEl.getAttribute('width') || String(svgEl.clientWidth);
-            const h = svgEl.getAttribute('height') || String(svgEl.clientHeight);
-            if (w && !clone.getAttribute('width')) clone.setAttribute('width', String(w));
-            if (h && !clone.getAttribute('height')) clone.setAttribute('height', String(h));
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        } catch (e) {/* ignore */ }
-
-        const serialized = new XMLSerializer().serializeToString(clone);
-        return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(serialized);
-    };
-
-    // Convert an SVG data URL into a PNG data URL by drawing it onto a canvas
-    const svgDataUrlToPngDataUrl = async (svgDataUrl: string): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            (async () => {
-                const img = new Image();
-                await new Promise<void>((res, rej) => {
-                    img.onload = () => res();
-                    img.onerror = (e) => rej(e);
-                    img.src = svgDataUrl;
-                });
-                const ratio = window.devicePixelRatio || 1;
-                const w = img.width;
-                const h = img.height;
-                const canvas = document.createElement('canvas');
-                canvas.width = Math.round(w * ratio);
-                canvas.height = Math.round(h * ratio);
-                canvas.style.width = w + 'px';
-                canvas.style.height = h + 'px';
-                const ctx = canvas.getContext('2d');
-                if (!ctx) throw new Error('no-canvas-ctx');
-                ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-                ctx.drawImage(img, 0, 0);
-                return canvas.toDataURL('image/png');
-            })().then(resolve).catch(reject);
-        });
-    };
-
-    // Composite export: draw SVG (edges) then rasterize each HTML node and draw on top
-    const compositeViewportPng = async (): Promise<string | null> => {
-        if (!reactFlowWrapper.current) return null;
-        const root = (reactFlowWrapper.current.querySelector('.react-flow')
-            ?? reactFlowWrapper.current.querySelector('.react-flow__viewport')
-            ?? reactFlowWrapper.current) as HTMLElement | null;
-        if (!root) return null;
-
-        const rect = root.getBoundingClientRect();
-        const ratio = window.devicePixelRatio || 1;
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(rect.width * ratio);
-        canvas.height = Math.round(rect.height * ratio);
-        canvas.style.width = rect.width + 'px';
-        canvas.style.height = rect.height + 'px';
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return null;
-        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-
-        // Rellenar el fondo con blanco
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, rect.width, rect.height);
-
-        // draw edges (SVG) first
-        try {
-            const svgUrl = await getSerializedSvgDataUrl();
-            if (svgUrl) {
-                await new Promise<void>((res, rej) => {
-                    const img = new Image();
-                    img.onload = () => {
-                        try {
-                            ctx.drawImage(img, 0, 0, rect.width, rect.height); res(); 
-                        } catch (e) { rej(e); }
-                    };
-                    img.onerror = rej;
-                    img.src = svgUrl;
-                });
-            }
-        } catch (e) {
-            // ignore svg draw errors
-            console.warn('Error drawing svg', e);
-        }
-
-        // produce a nodes-only raster by cloning root and removing the SVG renderer from the clone
-        try {
-            const clone = root.cloneNode(true) as HTMLElement;
-            // remove svg renderer from clone so only nodes remain
-            const svgInClone = clone.querySelector('.react-flow__renderer svg') ?? clone.querySelector('svg');
-            if (svgInClone && svgInClone.parentNode) svgInClone.parentNode.removeChild(svgInClone);
-
-            // place clone in an offscreen container
-            const off = document.createElement('div');
-            off.style.position = 'fixed';
-            off.style.left = '-9999px';
-            off.style.top = '0';
-            off.style.width = rect.width + 'px';
-            off.style.height = rect.height + 'px';
-            off.style.overflow = 'visible';
-            off.style.background = 'transparent';
-            clone.style.width = rect.width + 'px';
-            clone.style.height = rect.height + 'px';
-            off.appendChild(clone);
-            document.body.appendChild(off);
-
-            // allow styles to settle
-            await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
-            const nodesOnlyDataUrl = await toPng(clone as HTMLElement, {
-                cacheBust: true,
-                backgroundColor: '#ffffff'
-            });
-            // draw nodes image on top of edges
-            await new Promise<void>((res, rej) => {
-                const img = new Image();
-                img.onload = () => {
-                    try {
-                        ctx.drawImage(img, 0, 0, rect.width, rect.height); res(); 
-                    } catch (e) { rej(e); }
-                };
-                img.onerror = rej;
-                img.src = nodesOnlyDataUrl;
-            });
-
-            try {
-                document.body.removeChild(off); // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            } catch (e) { /* ignore */ }
-        } catch (e) {
-            console.warn('Failed to create nodes-only raster via clone', e);
-            // fallback: try rasterizing individual nodes
-            const nodeEls = Array.from(root.querySelectorAll('.react-flow__node')) as HTMLElement[];
-
-            for (const nodeEl of nodeEls) {
-                try {
-                    const nRect = nodeEl.getBoundingClientRect();
-                    const dx = nRect.left - rect.left;
-                    const dy = nRect.top - rect.top;
-
-                    const imgDataUrl = await toPng(nodeEl as HTMLElement, {
-                        cacheBust: true,
-                        backgroundColor: '#ffffff'
-                    });
-                    await new Promise<void>((res, rej) => {
-                        const img = new Image();
-                        img.onload = () => {
-                            try {
-                                ctx.drawImage(img, dx, dy, nRect.width, nRect.height); res(); 
-                            } catch (e) { rej(e); }
-                        };
-                        img.onerror = rej;
-                        img.src = imgDataUrl;
-                    });
-                } catch (e) {
-                    console.warn('Failed to rasterize node', e);
-                }
-            }
-        }
-
-        return canvas.toDataURL('image/png');
-    };
-
-    const exportPDF = async () => {
-        if (!reactFlowWrapper.current) return;
-        // Prefer composite export (SVG edges + rasterized nodes) for best fidelity
-        let dataUrl: string | null = null;
-        try {
-            dataUrl = await compositeViewportPng();
-        } catch (e) { console.warn('composite export failed', e); }
-        if (!dataUrl) {
-            try {
-                const svgUrl = await getSerializedSvgDataUrl();
-                if (svgUrl) dataUrl = await svgDataUrlToPngDataUrl(svgUrl);
-            } catch (e) {
-                console.warn('SVG export failed, falling back to DOM clone export', e);
-            }
-        }
-        if (!dataUrl) dataUrl = await captureViewportDataUrl();
-        if (!dataUrl) return;
-        const img = new Image();
-        img.src = dataUrl;
-        await img.decode();
-        const w = img.width;
-        const h = img.height;
-        const pdf = new jsPDF({ unit: 'px', format: [w, h] });
-        pdf.addImage(dataUrl, 'PNG', 0, 0, w, h);
-        const arrayBuffer = pdf.output('arraybuffer');
-        const bytes = new Uint8Array(arrayBuffer);
-
-        const blob = new Blob([bytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'diagram.pdf';
-        a.click();
-        URL.revokeObjectURL(url);
-    };
+    
 
     // Selection controls for rotate/scale
     const selectedNode = nodes.find((n) => n.selected);
@@ -1550,7 +1327,7 @@ function FlowApp(): React.ReactElement {
     };
 
     return (
-        <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
             <AppBar position="static">
                 <Toolbar variant="dense">
                     <IconButton color="inherit" onClick={handleNewSchema} title="Nuevo esquema">
@@ -1587,13 +1364,22 @@ function FlowApp(): React.ReactElement {
                     </IconButton>
                     {!isSelectingExportArea ? (
                         <>
-                            <IconButton color="inherit" onClick={startAreaSelection} title="Seleccionar área para exportar PNG">
+                            <IconButton color="inherit" onClick={() => startAreaSelection('png')} title="Seleccionar área para exportar PNG">
                                 <CropFreeIcon />
+                            </IconButton>
+                            <IconButton color="inherit" onClick={() => startAreaSelection('pdf')} title="Seleccionar área para exportar PDF">
+                                <PictureAsPdfIcon />
                             </IconButton>
                         </>
                     ) : (
                         <>
-                            <IconButton color="inherit" onClick={exportSelectedAreaPNG} title="Exportar área seleccionada" disabled={!exportArea}>
+                            <IconButton color="inherit" onClick={async () => {
+                                if (pendingExportType === 'pdf') {
+                                    await exportSelectedAreaPDF();
+                                } else {
+                                    await exportSelectedAreaPNG();
+                                }
+                            }} title="Exportar área seleccionada" disabled={!exportArea}>
                                 <CheckIcon />
                             </IconButton>
                             <IconButton color="inherit" onClick={cancelAreaSelection} title="Cancelar selección">
@@ -1601,25 +1387,23 @@ function FlowApp(): React.ReactElement {
                             </IconButton>
                         </>
                     )}
-                    <IconButton color="inherit" onClick={exportPDF} title="Exportar PDF">
-                        <PictureAsPdfIcon />
-                    </IconButton>
                 </Toolbar>
             </AppBar>
             <Box
                 ref={reactFlowWrapper}
-                style={{
+                sx={{
                     flex: 1,
                     position: 'relative',
-                    cursor: isSelectingExportArea ? 'crosshair' : 'default'
+                    cursor: isSelectingExportArea ? 'crosshair' : 'default',
+                    overflow: 'auto'
                 }}
                 onMouseDown={isSelectingExportArea ? handleCanvasMouseDown : undefined}
                 onMouseMove={isSelectingExportArea ? handleCanvasMouseMove : undefined}
                 onMouseUp={isSelectingExportArea ? handleCanvasMouseUp : undefined}
             >
                 <ReactFlowProvider>
-                    <ReactFlow
-                        style={{ width: '100%', height: '100%' }}
+            <ReactFlow
+                style={{ width: '100%', height: '100%' }}
                         nodes={nodes}
                         edges={edges}
                         onNodesChange={onNodesChange}
@@ -1649,9 +1433,9 @@ function FlowApp(): React.ReactElement {
                 </ReactFlowProvider>
 
                 {/* Overlay para mostrar el área de selección */}
-                {isSelectingExportArea && exportArea && (
+                {isSelectingExportArea && exportArea && showSelectionOverlay && (
                     <Box
-                        style={{
+                        sx={{
                             position: 'absolute',
                             left: exportArea.x,
                             top: exportArea.y,
@@ -1666,40 +1450,61 @@ function FlowApp(): React.ReactElement {
                 )}
 
                 {/* Instrucciones para la selección de área */}
-                {isSelectingExportArea && (
+                {isSelectingExportArea && showSelectionOverlay && (
                     <Box
-                        style={{
+                        sx={{
                             position: 'absolute',
                             top: '50%',
                             left: '50%',
                             transform: 'translate(-50%, -50%)',
-                            background: 'rgba(0, 0, 0, 0.8)',
+                            background: 'rgba(0, 0, 0, 0.6)',
                             color: 'white',
-                            padding: '16px',
-                            borderRadius: '8px',
+                            p: 2,
+                            borderRadius: 1,
                             textAlign: 'center',
                             zIndex: 1001,
                             pointerEvents: 'none'
                         }}
                     >
-                        <Typography variant="h6" style={{ marginBottom: '8px' }}>
+                        <Typography variant="h6" sx={{ mb: 1 }}>
                             Seleccionar área para exportar
                         </Typography>
-                        <Typography variant="body2">
+                        <Typography variant="body2" sx={{ mb: 1 }}>
                             Arrastra para dibujar un rectángulo sobre el área que quieres exportar
                         </Typography>
+                        {/* orientation controls: allow clicks without blocking drawing (container pointerEvents none) */}
+                        {pendingExportType === 'pdf' && (
+                            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', pointerEvents: 'auto' }}>
+                                <Button
+                                    variant={exportPDFOrientation === 'portrait' ? 'contained' : 'outlined'}
+                                    size="small"
+                                    sx={{color: 'white'}}
+                                    onClick={() => setExportPDFOrientation('portrait')}
+                                >
+                                    Vertical
+                                </Button>
+                                <Button
+                                    variant={exportPDFOrientation === 'landscape' ? 'contained' : 'outlined'}
+                                    size="small"
+                                    sx={{color: 'white'}}
+                                    onClick={() => setExportPDFOrientation('landscape')}
+                                >
+                                    Horizontal
+                                </Button>
+                            </Box>
+                        )}
                     </Box>
                 )}
             </Box>
             <DynamicPalette onDragStart={onDragStart} />
             {selectedNode ? (
-                <Box style={{ position: 'absolute', right: 12, top: 72, padding: 8, background: '#fff', border: '1px solid #ddd', borderRadius: 6, zIndex: 1300 }}>
-                    <Typography variant="h6" style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, textAlign: 'center' }}>
+                <Box sx={{ position: 'absolute', right: 12, top: 72, padding: 2, backgroundColor: 'rgba(0, 0, 0, 0.6)', border: '1px solid #ddd', borderRadius: 6, zIndex: 1300 }}>
+                    <Typography variant="h6" sx={{ fontSize: 14, fontWeight: 600, marginBottom: 2, textAlign: 'center', color: 'white' }}>
                         Edición
                     </Typography>
-                    <Box style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
                         <Button
-                            variant="outlined"
+                            variant="contained"
                             size="small"
                             fullWidth
                             startIcon={<RotateLeftIcon />}
@@ -1708,7 +1513,7 @@ function FlowApp(): React.ReactElement {
                             90°
                         </Button>
                         <Button
-                            variant="outlined"
+                            variant="contained"
                             size="small"
                             fullWidth
                             startIcon={<RotateRightIcon />}
@@ -1717,9 +1522,9 @@ function FlowApp(): React.ReactElement {
                             90°
                         </Button>
                     </Box>
-                    <Box style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <Box sx={{ display: 'flex', gap: 1, mb: 1, width: 220 }}>
                         <Button
-                            variant="outlined"
+                            variant="contained"
                             size="small"
                             fullWidth
                             startIcon={<FlipIcon />}
@@ -1728,16 +1533,16 @@ function FlowApp(): React.ReactElement {
                             Flip X
                         </Button>
                         <Button
-                            variant="outlined"
+                            variant="contained"
                             size="small"
                             fullWidth
-                            startIcon={<FlipIcon style={{ transform: 'rotate(90deg)' }} />}
+                            startIcon={<FlipIcon sx={{ transform: 'rotate(90deg)' }} />}
                             onClick={() => updateSelectedNodeData({ flipY: !(selectedNode.data?.flipY ?? false) })}
                         >
                             Flip Y
                         </Button>
                     </Box>
-                    <Box style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 1, color:'white' }}>
                         <TextField
                             type="number"
                             size="small"
@@ -1745,8 +1550,28 @@ function FlowApp(): React.ReactElement {
                                 htmlInput: {
                                     min: 0.5,
                                     max: 2,
-                                    step: 0.05
+                                    step: 0.05,
                                 }
+                            }}
+                            sx={{
+                                borderColor: 'white',
+                                '& .MuiOutlinedInput-root': {
+                                    '& fieldset': {
+                                        borderColor: 'white',
+                                    },
+                                    '&:hover fieldset': {
+                                        borderColor: 'white',
+                                    },
+                                    '&.Mui-focused fieldset': {
+                                        borderColor: 'white',
+                                    },
+                                },
+                                '& .MuiInputLabel-root': {
+                                    color: 'white',
+                                },
+                                '& .MuiInputBase-input': {
+                                    color: 'white',
+                                },
                             }}
                             fullWidth
                             label="Escala"
@@ -1758,10 +1583,11 @@ function FlowApp(): React.ReactElement {
                             }}
                         />
                     </Box>
-                    <Box style={{ display: 'flex', justifyContent: 'center' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'center' }}>
                         <Button
                             variant="contained"
                             size="small"
+                            fullWidth
                             startIcon={<SwapHorizIcon />}
                             onClick={() => updateSelectedNodeData({ invertHandles: !(selectedNode.data?.invertHandles ?? false) })}
                         >
@@ -1844,7 +1670,7 @@ function FlowApp(): React.ReactElement {
                                     secondary={`${schema.description ? schema.description + ' • ' : ''}Actualizado: ${new Date(schema.updated_at || '').toLocaleString()}`}
                                     secondaryTypographyProps={{
                                         component: 'span',
-                                        style: { whiteSpace: 'pre-line' }
+                                        sx: { whiteSpace: 'pre-line' }
                                     }}
                                 />
                                 <ListItemSecondaryAction>
@@ -1923,6 +1749,18 @@ function FlowApp(): React.ReactElement {
                     }}
                 />
             </React.Suspense>
+            <Box sx={{ position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 1200 }}>
+                <Typography
+                    component="a"
+                    href="https://github.com/pnbarbeito/DrawPaK-Web"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    variant="caption"
+                    sx={{ color: 'rgba(37, 34, 34, 0.85)', textDecoration: 'none' }}
+                >
+                    Publicado bajo licencia Apache-2.0 - © 2025 Pablo N. Barbeito
+                </Typography>
+            </Box>
         </Box>
     );
 }

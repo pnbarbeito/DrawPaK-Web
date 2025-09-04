@@ -343,8 +343,8 @@ const SvgEditorDialog: React.FC<Props> = ({
     }
   };
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
-      <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#1976d2', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>
+    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth sx={{borderRadius:4}}>
+      <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#263238', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>
         Crear/Editar Elemento SVG
         </DialogTitle>
       <DialogContent>
