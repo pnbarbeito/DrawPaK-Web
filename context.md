@@ -1,12 +1,246 @@
-# Contexto del proyecto DrawPaK-Web
+# DrawPaK Web - Contexto del Proyecto
 
-Resumen breve
+## Información General
+- **Nombre**: DrawPaK Web
+- **Versión**: 0.0.0
+- **Licencia**: Apache-2.0
+- **Tipo**: Aplicación web para diagramas eléctricos/esquemáticos
+- **Fecha última actualización**: 5 de septiembre de 2025
 
-- Proyecto: DrawPaK-Web — editor gráfico de esquemas (diagramas) basado en React + TypeScript + Vite, empaquetado para entorno web. Usa Bun para administración de dependencias/instalación en desarrollo.
-- Propósito: permitir crear, editar y exportar diagramas que combinan nodos SVG (biblioteca de símbolos), etiquetas y conexiones. Persistencia local en IndexedDB vía Dexie.
-- Principal punto de entrada: `src/main.tsx`. Componente app principal: `src/components/FlowApp.tsx`.
+## Descripción del Proyecto
+DrawPaK Web es una aplicación web interactiva para crear diagramas eléctricos y esquemáticos. La aplicación permite:
+- Crear y editar diagramas con nodos interconectados
+- Gestionar bibliotecas de símbolos SVG personalizados
+- Guardar y cargar esquemas en base de datos local (IndexedDB)
+- Exportar diagramas a PNG y PDF
+- Editor SVG integrado para crear símbolos personalizados
 
-Contenido de este documento
+## Stack Tecnológico
+
+### Frontend Framework
+- **React 19.1.1** - Framework principal
+- **TypeScript 5.8.3** - Lenguaje de programación
+- **Vite 7.1.2** - Build tool y dev server
+
+### Librerías Principales
+- **ReactFlow 11.11.4** - Librería para diagramas de flujo interactivos
+- **Material-UI 7.3.1** - Componentes UI (@mui/material, @emotion/react, @emotion/styled)
+- **Dexie 4.2.0** - Wrapper para IndexedDB (base de datos local)
+- **@svgdotjs/svg.js 3.2.4** - Manipulación SVG
+- **react-rnd 10.5.2** - Componentes redimensionables y arrastrables
+
+### Librerías de Utilidad
+- **html-to-image 1.11.13** - Exportación a PNG
+- **jspdf 3.0.2** - Exportación a PDF
+- **react-colorful 5.6.1** - Selector de colores
+- **dompurify 3.2.6** - Sanitización HTML/SVG
+- **material-symbols 0.35.0** - Iconografía
+
+### Herramientas de Desarrollo
+- **ESLint 9.33.0** - Linting
+- **TypeScript ESLint 8.39.1** - Linting específico para TypeScript
+- **@vitejs/plugin-react-swc 4.0.0** - Plugin React con SWC
+
+## Estructura del Proyecto
+
+```
+/
+├── public/                 # Archivos estáticos
+│   └── vite.svg           # Favicon
+├── src/                   # Código fuente
+│   ├── main.tsx          # Punto de entrada
+│   ├── App.tsx           # Componente raíz
+│   ├── theme.tsx         # Configuración tema MUI
+│   ├── index.css         # Estilos globales
+│   ├── App.css           # Estilos del componente App
+│   ├── assets/           # Assets estáticos
+│   │   └── react.svg
+│   └── components/       # Componentes React
+│       ├── FlowApp.tsx               # Componente principal de la aplicación
+│       ├── DynamicPalette.tsx        # Paleta de símbolos
+│       ├── SymbolNode.tsx            # Nodo de símbolo en ReactFlow
+│       ├── LabelNode.tsx             # Nodo de texto/etiqueta
+│       ├── PolygonNode.tsx           # Nodo de polígono (vacío)
+│       ├── SvgEditorDialog.tsx       # Editor SVG modal
+│       ├── SvgShapeEditor.tsx        # Editor de formas SVG
+│       ├── symbols.tsx               # Definiciones de símbolos por defecto
+│       ├── database.ts               # Capa de acceso a datos (IndexedDB)
+│       └── reactFlowConfig.ts        # Configuración ReactFlow
+├── package.json          # Dependencias y scripts
+├── tsconfig.json         # Configuración TypeScript (referencias)
+├── tsconfig.app.json     # Configuración TypeScript para la app
+├── tsconfig.node.json    # Configuración TypeScript para Node
+├── vite.config.ts        # Configuración Vite
+├── eslint.config.js      # Configuración ESLint
+├── index.html            # HTML base
+├── bun.lock              # Lock file de Bun
+└── LICENSE               # Licencia Apache 2.0
+```
+
+## Componentes Principales
+
+### FlowApp.tsx (2073 líneas)
+- **Propósito**: Componente principal que gestiona todo el flujo de la aplicación
+- **Características**:
+  - Gestión de estado de nodos y conexiones ReactFlow
+  - Sistema de guardado/carga de esquemas
+  - Gestión de biblioteca SVG
+  - Exportación PNG/PDF
+  - Interfaz de usuario completa con toolbar
+  - Snap to grid (20x20)
+  - Sistema de posicionamiento inteligente de nodos
+
+### SymbolNode.tsx (563 líneas)
+- **Propósito**: Componente de nodo que renderiza símbolos SVG
+- **Características**:
+  - Soporte para símbolos estáticos y dinámicos
+  - Transformaciones (rotación, escalado, flip)
+  - Sistema de handles (puntos de conexión)
+  - Preservación de datos SVG
+
+### DynamicPalette.tsx
+- **Propósito**: Paleta lateral con símbolos disponibles
+- **Características**:
+  - Categorización de símbolos
+  - Drag & drop para añadir símbolos al canvas
+  - Gestión de símbolos personalizados
+
+### Database.ts (860 líneas)
+- **Propósito**: Capa de acceso a datos usando IndexedDB
+- **Tablas**:
+  - `schemas`: Esquemas guardados (nodos + conexiones)
+  - `svg_elements`: Biblioteca de símbolos SVG personalizados
+- **Funcionalidades**:
+  - CRUD completo para esquemas y símbolos
+  - Inicialización automática con datos por defecto
+  - Sistema de categorías para símbolos
+
+### SvgEditorDialog.tsx y SvgShapeEditor.tsx
+- **Propósito**: Editor SVG integrado para crear símbolos personalizados
+- **Características**:
+  - Editor visual de formas básicas
+  - Manipulación directa de código SVG
+  - Definición de puntos de conexión (handles)
+  - Categorización de símbolos
+
+## Configuración del Entorno
+
+### TypeScript
+- **Target**: ES2022
+- **Módulo**: ESNext
+- **JSX**: react-jsx
+- **Modo strict**: Habilitado
+- **Configuración dividida**: app.json (aplicación) + node.json (herramientas)
+
+### Vite
+- **Plugin**: @vitejs/plugin-react-swc (React con SWC)
+- **Dev server**: Puerto por defecto (5173)
+
+### Material-UI
+- **Tema**: Modo claro forzado
+- **Colores**: Fondo #f5f7fb, AppBar #263238
+- **CssBaseline**: Habilitado para reset CSS
+
+### ReactFlow
+- **Tipos de nodo**: symbolNode, labelNode
+- **Tipos de conexión**: smoothstep por defecto
+- **Grid**: 20x20 píxeles
+- **Estilos**: CSS importado desde 'reactflow/dist/style.css'
+
+## Scripts Disponibles
+
+```bash
+bun dev      # Servidor de desarrollo
+bun build    # Build de producción (TypeScript + Vite)
+bun lint     # Linting con ESLint
+bun preview  # Preview del build
+```
+
+## Funcionalidades Principales
+
+### Gestión de Diagramas
+- Crear nodos arrastrando desde la paleta
+- Conectar nodos con líneas suaves
+- Snap automático a grid 20x20
+- Posicionamiento inteligente (evita solapamientos)
+- Zoom, pan, minimapa
+- Selección múltiple
+
+### Biblioteca de Símbolos
+- Símbolos predefinidos por categorías (transformadores, etc.)
+- Editor SVG para crear símbolos personalizados
+- Gestión de handles (puntos de conexión)
+- Sistema de categorías
+
+### Persistencia
+- IndexedDB para almacenamiento local
+- Esquemas guardados con metadatos
+- Biblioteca de símbolos persistente
+- Operaciones CRUD completas
+
+### Exportación
+- PNG de alta calidad usando html-to-image
+- PDF usando jsPDF
+- Preservación de calidad visual
+
+## Estado Actual del Desarrollo
+
+### Implementado ✅
+- Sistema base ReactFlow funcional
+- Gestión completa de esquemas (CRUD)
+- Editor SVG integrado y funcional
+- Exportación PNG/PDF
+- Sistema de handles dinámicos
+- Snap to grid
+- Paleta de símbolos categorizada
+- Base de datos IndexedDB
+
+### En Desarrollo 🚧
+- PolygonNode.tsx (archivo vacío)
+- Posibles mejoras en UX
+
+### Arquitectura
+- **Patrón**: Component-based con hooks
+- **Estado**: useState y useRef para estado local
+- **Efectos**: useEffect para sincronización
+- **Tipado**: TypeScript estricto con interfaces bien definidas
+
+## Convenciones de Código
+
+### Nomenclatura
+- Componentes: PascalCase
+- Funciones: camelCase
+- Constantes: UPPER_SNAKE_CASE
+- Archivos: kebab-case o PascalCase según tipo
+
+### Estructura
+- Un componente por archivo
+- Exports nombrados para utilidades
+- Default export para componentes principales
+- Tipado explícito para props e interfaces
+
+## Notas Técnicas
+
+### Gestión de Estado
+- No usa Redux/Zustand, state management local con React hooks
+- ReactFlow maneja internamente el estado del diagrama
+- Dexie/IndexedDB para persistencia
+
+### Rendimiento
+- Snap to grid optimizado
+- Posicionamiento inteligente de nodos
+- Lazy loading implícito en ReactFlow
+
+### Compatibilidad
+- Navegadores modernos (ES2022)
+- No hay dependencias de Node.js en runtime
+- Totalmente client-side
+
+Esta es una aplicación robusta y bien estructurada para creación de diagramas eléctricos con una arquitectura moderna y escalable.
+
+---
+
+## Contenido Original del Documento
 
 1. Visión general del stack
 2. Cómo ejecutar y desarrollar (Bun / Vite)

@@ -35,7 +35,7 @@ const LabelNode: React.FC<NodeProps<Data>> = ({ id, data, selected }) => {
   const fontSize = data?.fontSize ?? 14;
   const color = data?.color ?? '#000000';
   const backgroundColor = data?.backgroundColor ?? 'rgba(255, 255, 255, 0)';
-  const borderColor = data?.borderColor ?? undefined;
+  const borderColor = data?.borderColor ?? '#000000';
   const borderWidth = data?.borderWidth ?? 0;
   const rotation = data?.rotation ?? 0;
   const scale = data?.scale ?? 1;

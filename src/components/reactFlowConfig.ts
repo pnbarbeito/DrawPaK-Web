@@ -1,10 +1,14 @@
 import SymbolNode from './SymbolNode';
 import LabelNode from './LabelNode';
-import AreaNode from './AreaNode';
 import PolygonNode from './PolygonNode';
 
+
 // Define nodeTypes outside of any component to prevent recreation
-export const nodeTypes = { symbolNode: SymbolNode, labelNode: LabelNode, areaNode: AreaNode, polygonNode: PolygonNode };
+export const nodeTypes = { 
+  symbolNode: SymbolNode, 
+  labelNode: LabelNode,
+  polygonNode: PolygonNode
+};
 
 // Define defaultEdgeOptions outside component to prevent recreation
 export const defaultEdgeOptions = {

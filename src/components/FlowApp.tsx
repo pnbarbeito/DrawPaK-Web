@@ -17,6 +17,7 @@ import type { Schema, SvgElement } from './database.ts';
 import SvgEditorDialog from './SvgEditorDialog';
 import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
+import type { PolygonPoint } from './PolygonNode';
 // No Tauri runtime in web build — all file save actions use browser fallbacks.
 import { Box, AppBar, Toolbar, IconButton, Typography, Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, List, ListItem, ListItemText, Checkbox, FormControlLabel } from '@mui/material';
 import Popover from '@mui/material/Popover';
@@ -217,6 +218,12 @@ function FlowApp(): React.ReactElement {
   const [svgElements, setSvgElements] = React.useState<SvgElement[]>([]);
   const [svgCategories, setSvgCategories] = React.useState<string[]>([]);
   const [svgName, setSvgName] = React.useState('');
+
+  // Estado para polígonos
+  const [isDrawingPolygon, setIsDrawingPolygon] = React.useState(false);
+  const [currentPolygonPoints, setCurrentPolygonPoints] = React.useState<PolygonPoint[]>([]);
+  const [tempPolygonPoints, setTempPolygonPoints] = React.useState<PolygonPoint[]>([]);
+  const [showPolygonPreview, setShowPolygonPreview] = React.useState(false);
   const [svgDescription, setSvgDescription] = React.useState('');
   const [svgCategory, setSvgCategory] = React.useState('custom');
   const [svgMarkup, setSvgMarkup] = React.useState('');
@@ -980,6 +987,83 @@ function FlowApp(): React.ReactElement {
     // pasted nodes and edges
   }, [clipboard, setNodes, setEdges, nodes]);
 
+  // Funciones para manejo de polígonos
+  const togglePolygonMode = useCallback(() => {
+    setIsDrawingPolygon(prev => !prev);
+    // Si estamos saliendo del modo polígono, limpiar puntos temporales
+    if (isDrawingPolygon) {
+      setCurrentPolygonPoints([]);
+      setTempPolygonPoints([]);
+      setShowPolygonPreview(false);
+    }
+  }, [isDrawingPolygon]);
+
+  const addPolygonPoint = useCallback((event: React.MouseEvent) => {
+    if (!isDrawingPolygon || !reactFlowWrapper.current || !reactFlowInstance.current) return;
+
+    const rect = reactFlowWrapper.current.getBoundingClientRect();
+    
+    // Coordenadas relativas al contenedor ReactFlow
+    const clientX = event.clientX - rect.left;
+    const clientY = event.clientY - rect.top;
+    
+    // Usar el método project de ReactFlow que considera el zoom y pan actual
+    const position = reactFlowInstance.current.project({ 
+      x: clientX, 
+      y: clientY 
+    });
+
+    if (position) {
+      // Snap to grid
+      const snappedPosition = snapToGridPos(position, GRID_SIZE);
+      
+      setCurrentPolygonPoints(prev => [...prev, snappedPosition]);
+      setShowPolygonPreview(true);
+    }
+  }, [isDrawingPolygon]);
+
+  const finishPolygon = useCallback(() => {
+    if (currentPolygonPoints.length >= 3) {
+      // Crear nuevo nodo polígono
+      const polygonId = `polygon_${Date.now()}`;
+      
+      // Calcular posición del nodo (esquina superior izquierda del bounding box)
+      const minX = Math.min(...currentPolygonPoints.map(p => p.x));
+      const minY = Math.min(...currentPolygonPoints.map(p => p.y));
+
+      const newPolygonNode: Node = {
+        id: polygonId,
+        type: 'polygonNode',
+        position: { x: minX, y: minY },
+        data: {
+          points: currentPolygonPoints,
+          strokeColor: '#2196F3',
+          strokeWidth: 2,
+          strokeDasharray: '5,5',
+          fillColor: '#2196F3',
+          fillOpacity: 0.1
+        },
+        selectable: true,
+        deletable: true
+      };
+
+      setNodes(nds => [...nds, newPolygonNode]);
+    }
+
+    // Limpiar estado
+    setCurrentPolygonPoints([]);
+    setTempPolygonPoints([]);
+    setShowPolygonPreview(false);
+    setIsDrawingPolygon(false);
+  }, [currentPolygonPoints, setNodes]);
+
+  const cancelPolygon = useCallback(() => {
+    setCurrentPolygonPoints([]);
+    setTempPolygonPoints([]);
+    setShowPolygonPreview(false);
+    setIsDrawingPolygon(false);
+  }, []);
+
   // ...existing code... (exportWithoutBackground moved inside export callbacks)
 
   useEffect(() => {
@@ -1015,13 +1099,27 @@ function FlowApp(): React.ReactElement {
         pasteElements();
         return;
       }
+
+      // Manejo de teclas para polígonos
+      if (isDrawingPolygon) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          finishPolygon();
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          cancelPolygon();
+          return;
+        }
+      }
     };
 
     // use capture phase so other layers (like ReactFlow) don't stop the event before we see it
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleDelete, copySelectedElements, pasteElements]);
+  }, [handleDelete, copySelectedElements, pasteElements, isDrawingPolygon, finishPolygon, cancelPolygon]);
 
 
 
@@ -1063,8 +1161,8 @@ function FlowApp(): React.ReactElement {
       };
 
       // Convert DOM coords to React Flow coords taking zoom/offset into account
-      const flowPos = (reactFlowInstance.current && typeof reactFlowInstance.current.screenToFlowPosition === 'function')
-        ? reactFlowInstance.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      const flowPos = (reactFlowInstance.current && typeof reactFlowInstance.current.project === 'function')
+        ? reactFlowInstance.current.project(domPosition)
         : domPosition;
 
       // Encontrar una posición libre usando la función centralizada
@@ -1410,50 +1508,9 @@ function FlowApp(): React.ReactElement {
           <IconButton color="inherit" onClick={() => { loadSvgElements(); loadSvgCategories(); setShowSvgDialog(true); }} title="Elementos SVG">
             <span className="material-symbols-rounded">edit</span>
           </IconButton>
-          {/* Insert polygon (area outline) */}
-          <IconButton color="inherit" onClick={() => {
-            // Insert a default polygon (rectangle) centered in view
-            let center = { x: 100, y: 100 };
-            try {
-              if (reactFlowWrapper.current) {
-                const rect = reactFlowWrapper.current.getBoundingClientRect();
-                const screenCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-                if (reactFlowInstance.current && typeof reactFlowInstance.current.screenToFlowPosition === 'function') {
-                  center = reactFlowInstance.current.screenToFlowPosition(screenCenter);
-                }
-              }
-            } catch (e) { console.warn('Error computing center position for polygon insert', e); }
-            console.debug('Inserting polygon at center', center);
-            const w = 520;
-            const h = 240;
-            const defaultPoints = [
-              { x: 8, y: 8 },
-              { x: w - 8, y: 8 },
-              { x: w - 8, y: h - 8 },
-              { x: 8, y: h - 8 }
-            ];
-            const newNode = {
-              id: getId(),
-              position: { x: Math.round(center.x - w / 2), y: Math.round(center.y - h / 2) },
-              type: 'polygonNode',
-              data: { points: defaultPoints, width: w, height: h, label: 'Área poligonal' }
-            };
-            setNodes((nds) => nds.concat(newNode));
-          }} title="Añadir polígono">
-            <span className="material-symbols-rounded">category</span>
-          </IconButton>
           <IconButton color="inherit" onClick={() => {
             // Añadir una etiqueta en el centro de la vista actual
-            let center = { x: 100, y: 100 };
-            try {
-              if (reactFlowWrapper.current) {
-                const rect = reactFlowWrapper.current.getBoundingClientRect();
-                const screenCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-                if (reactFlowInstance.current && typeof reactFlowInstance.current.screenToFlowPosition === 'function') {
-                  center = reactFlowInstance.current.screenToFlowPosition(screenCenter);
-                }
-              }
-            } catch (e) { console.warn('Error computing center position for label insert', e); }
+            const center = reactFlowInstance.current ? reactFlowInstance.current.project({ x: (reactFlowWrapper.current?.clientWidth || 800) / 2, y: (reactFlowWrapper.current?.clientHeight || 600) / 2 }) : { x: 100, y: 100 };
             const position = findFreePosition(center, nodes);
             const newLabelNode = {
               id: getId(),
@@ -1464,6 +1521,19 @@ function FlowApp(): React.ReactElement {
             setNodes((nds) => nds.concat(newLabelNode));
           }} title="Añadir etiqueta">
             <span className="material-symbols-rounded">label</span>
+          </IconButton>
+          <IconButton 
+            color="inherit" 
+            onClick={togglePolygonMode} 
+            title={isDrawingPolygon ? "Salir del modo polígono (Esc para cancelar)" : "Dibujar polígono (clic para puntos, Enter para terminar)"}
+            sx={{ 
+              backgroundColor: isDrawingPolygon ? 'rgba(255,255,255,0.2)' : 'transparent',
+              '&:hover': {
+                backgroundColor: isDrawingPolygon ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.1)'
+              }
+            }}
+          >
+            <span className="material-symbols-rounded">polyline</span>
           </IconButton>
           <IconButton color="inherit" onClick={pasteElements} title="Pegar elementos (Ctrl+V)" disabled={!clipboard || clipboard.nodes.length === 0}>
             <span className="material-symbols-rounded">content_paste</span>
@@ -1500,7 +1570,7 @@ function FlowApp(): React.ReactElement {
         sx={{
           flex: 1,
           position: 'relative',
-          cursor: isSelectingExportArea ? 'crosshair' : 'default',
+          cursor: isSelectingExportArea ? 'crosshair' : isDrawingPolygon ? 'crosshair' : 'default',
           overflow: 'auto'
         }}
         onMouseDown={isSelectingExportArea ? handleCanvasMouseDown : undefined}
@@ -1509,13 +1579,18 @@ function FlowApp(): React.ReactElement {
       >
         <ReactFlowProvider>
           <ReactFlow
-            style={{ width: '100%', height: '100%' }}
+            style={{ 
+              width: '100%', 
+              height: '100%',
+              cursor: isDrawingPolygon ? 'crosshair' : 'default'
+            }}
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onNodeDragStop={onNodeDragStop}
+            onPaneClick={addPolygonPoint}
             snapToGrid={true}
             snapGrid={snapGrid}
             connectionLineType={ConnectionLineType.SmoothStep}
@@ -1527,8 +1602,8 @@ function FlowApp(): React.ReactElement {
             fitView
             attributionPosition="bottom-left"
             connectOnClick={false}
-            elementsSelectable={!isSelectingExportArea}
-            panOnDrag={!isSelectingExportArea}
+            elementsSelectable={!isSelectingExportArea && !isDrawingPolygon}
+            panOnDrag={!isSelectingExportArea && !isDrawingPolygon}
             zoomOnScroll={!isSelectingExportArea}
             zoomOnPinch={!isSelectingExportArea}
             zoomOnDoubleClick={!isSelectingExportArea}
@@ -1599,6 +1674,113 @@ function FlowApp(): React.ReactElement {
                   Horizontal
                 </Button>
               </Box>
+            )}
+          </Box>
+        )}
+
+        {/* Overlay para mostrar vista previa del polígono */}
+        {isDrawingPolygon && currentPolygonPoints.length > 0 && reactFlowWrapper.current && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              pointerEvents: 'none',
+              zIndex: 1000
+            }}
+          >
+            <svg
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                overflow: 'visible'
+              }}
+            >
+              {/* Líneas conectando los puntos del polígono */}
+              {currentPolygonPoints.map((point, index) => {
+                if (index === 0) return null;
+                const prevPoint = currentPolygonPoints[index - 1];
+                const reactFlowRect = reactFlowWrapper.current?.getBoundingClientRect();
+                if (!reactFlowRect || !reactFlowInstance.current) return null;
+                
+                const screenPoint1 = reactFlowInstance.current.flowToScreenPosition(prevPoint);
+                const screenPoint2 = reactFlowInstance.current.flowToScreenPosition(point);
+                
+                return (
+                  <line
+                    key={`line-${index}`}
+                    x1={screenPoint1.x - reactFlowRect.left}
+                    y1={screenPoint1.y - reactFlowRect.top}
+                    x2={screenPoint2.x - reactFlowRect.left}
+                    y2={screenPoint2.y - reactFlowRect.top}
+                    stroke="#2196F3"
+                    strokeWidth="2"
+                    strokeDasharray="5,5"
+                  />
+                );
+              })}
+              
+              {/* Puntos del polígono */}
+              {currentPolygonPoints.map((point, index) => {
+                const reactFlowRect = reactFlowWrapper.current?.getBoundingClientRect();
+                if (!reactFlowRect || !reactFlowInstance.current) return null;
+                
+                const screenPoint = reactFlowInstance.current.flowToScreenPosition(point);
+                
+                return (
+                  <circle
+                    key={`point-${index}`}
+                    cx={screenPoint.x - reactFlowRect.left}
+                    cy={screenPoint.y - reactFlowRect.top}
+                    r="4"
+                    fill="#2196F3"
+                    stroke="white"
+                    strokeWidth="2"
+                  />
+                );
+              })}
+            </svg>
+          </Box>
+        )}
+
+        {/* Instrucciones para dibujar polígonos */}
+        {isDrawingPolygon && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 80,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: 'rgba(33, 150, 243, 0.9)',
+              color: 'white',
+              p: 2,
+              borderRadius: 1,
+              textAlign: 'center',
+              zIndex: 1001,
+              pointerEvents: 'none'
+            }}
+          >
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              <strong>Modo Polígono Activo</strong>
+            </Typography>
+            <Typography variant="caption" display="block">
+              • Clic para añadir puntos
+            </Typography>
+            <Typography variant="caption" display="block">
+              • Enter para terminar polígono (min. 3 puntos)
+            </Typography>
+            <Typography variant="caption" display="block">
+              • Escape para cancelar
+            </Typography>
+            {currentPolygonPoints.length > 0 && (
+              <Typography variant="caption" display="block" sx={{ mt: 1, fontWeight: 'bold' }}>
+                Puntos: {currentPolygonPoints.length}
+              </Typography>
             )}
           </Box>
         )}
