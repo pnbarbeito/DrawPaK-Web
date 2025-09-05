@@ -1,9 +1,7 @@
 import React from 'react';
 import { Box, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, FormControlLabel, Checkbox, Typography, Select, MenuItem, FormControl, InputLabel } from '@mui/material';
 import SvgShapeEditor from './SvgShapeEditor';
-import SaveIcon from '@mui/icons-material/Save';
-import DeleteIcon from '@mui/icons-material/Delete';
-import CloseIcon from '@mui/icons-material/Close';
+// Replaced MUI icons with material symbol spans
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -85,22 +83,22 @@ const SvgEditorDialog: React.FC<Props> = ({
         }
       }
 
-  // parse handles (may be stored as stringified JSON)
-  let handlesRaw: unknown = [];
-  try { handlesRaw = el.handles ? (typeof el.handles === 'string' ? JSON.parse(el.handles) : el.handles) : []; } catch { handlesRaw = []; }
+      // parse handles (may be stored as stringified JSON)
+      let handlesRaw: unknown = [];
+      try { handlesRaw = el.handles ? (typeof el.handles === 'string' ? JSON.parse(el.handles) : el.handles) : []; } catch { handlesRaw = []; }
 
-  // normalize handles to expected shape: { id, x, y, type }
-  let handles: ImportedHandle[] = [];
-  if (Array.isArray(handlesRaw)) {
-    handles = (handlesRaw as unknown[]).map((h, idx) => {
-      const ho = h as Record<string, unknown> | undefined;
-      const id = (ho && typeof ho.id === 'string') ? ho.id : `h_${idx}`;
-  const x = (ho && typeof ho.x === 'number') ? ho.x : (ho && ho.x ? Number(String(ho.x)) : 0);
-  const y = (ho && typeof ho.y === 'number') ? ho.y : (ho && ho.y ? Number(String(ho.y)) : 0);
-      const type = (ho && typeof ho.type === 'string') ? ho.type : 'source';
-      return { id, x, y, type };
-    });
-  }
+      // normalize handles to expected shape: { id, x, y, type }
+      let handles: ImportedHandle[] = [];
+      if (Array.isArray(handlesRaw)) {
+        handles = (handlesRaw as unknown[]).map((h, idx) => {
+          const ho = h as Record<string, unknown> | undefined;
+          const id = (ho && typeof ho.id === 'string') ? ho.id : `h_${idx}`;
+          const x = (ho && typeof ho.x === 'number') ? ho.x : (ho && ho.x ? Number(String(ho.x)) : 0);
+          const y = (ho && typeof ho.y === 'number') ? ho.y : (ho && ho.y ? Number(String(ho.y)) : 0);
+          const type = (ho && typeof ho.type === 'string') ? ho.type : 'source';
+          return { id, x, y, type };
+        });
+      }
 
       // Try to parse SVG child elements into editable shapes (rect/circle/line)
       const shapes: ImportedShape[] = [];
@@ -227,14 +225,14 @@ const SvgEditorDialog: React.FC<Props> = ({
               const cx = (startX + x2) / 2;
               const cy = (startY + y2) / 2;
               const stroke = pathEl.getAttribute('stroke') || '#000';
-                const strokeW = parseFloat(pathEl.getAttribute('stroke-width') || '1');
-                // include x-axis-rotation from the arc command plus any ancestor rotate()
-                const rotation = (parseTransformRotation(pathEl) || 0) + (xAxisRot || 0);
-                shapes.push({ id: `shape_import_semi_${el.id}_${idx}_${Date.now()}`, type: 'semicircle', x: cx, y: cy, r: rx, fill: false, fillColor: 'none', strokeColor: stroke, strokeWidth: strokeW || 1, rotation: rotation || 0, handles: [] });
+              const strokeW = parseFloat(pathEl.getAttribute('stroke-width') || '1');
+              // include x-axis-rotation from the arc command plus any ancestor rotate()
+              const rotation = (parseTransformRotation(pathEl) || 0) + (xAxisRot || 0);
+              shapes.push({ id: `shape_import_semi_${el.id}_${idx}_${Date.now()}`, type: 'semicircle', x: cx, y: cy, r: rx, fill: false, fillColor: 'none', strokeColor: stroke, strokeWidth: strokeW || 1, rotation: rotation || 0, handles: [] });
               return; // handled this path as semicircle
             }
           }
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
         } catch (e) {
           // parsing failed, fall back to numeric extraction below
         }
@@ -256,12 +254,12 @@ const SvgEditorDialog: React.FC<Props> = ({
       // If we parsed at least one supported shape, assign handles to nearest shape center
       if (shapes.length > 0) {
         const distSq = (x1: number, y1: number, x2: number, y2: number) => (x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2);
-  const shapeCenter = (s: ImportedShape) => {
-            if (s.type === 'rect') return { x: (s.x || 0) + ((s.w || 0) / 2), y: (s.y || 0) + ((s.h || 0) / 2) };
-            if (s.type === 'circle') return { x: s.x || 0, y: s.y || 0 };
-            if (s.type === 'line') return { x: ((s.x1 || 0) + (s.x2 || 0)) / 2, y: ((s.y1 || 0) + (s.y2 || 0)) / 2 };
-            return { x: 0, y: 0 };
-          };
+        const shapeCenter = (s: ImportedShape) => {
+          if (s.type === 'rect') return { x: (s.x || 0) + ((s.w || 0) / 2), y: (s.y || 0) + ((s.h || 0) / 2) };
+          if (s.type === 'circle') return { x: s.x || 0, y: s.y || 0 };
+          if (s.type === 'line') return { x: ((s.x1 || 0) + (s.x2 || 0)) / 2, y: ((s.y1 || 0) + (s.y2 || 0)) / 2 };
+          return { x: 0, y: 0 };
+        };
 
         handles.forEach((h, idx) => {
           let bestIdx = 0;
@@ -298,9 +296,9 @@ const SvgEditorDialog: React.FC<Props> = ({
         const payload = { shapes: [shape], canvasWidth: w, canvasHeight: h };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
       }
-  // ensure editor is active and remount it so it reads from storage on mount
-  setUseEditor(true);
-  setEditorReloadKey(Date.now());
+      // ensure editor is active and remount it so it reads from storage on mount
+      setUseEditor(true);
+      setEditorReloadKey(Date.now());
     } catch (e) {
       console.error('Error copiando elemento al editor', e);
       alert('Error copiando elemento al editor');
@@ -337,16 +335,16 @@ const SvgEditorDialog: React.FC<Props> = ({
 
       const serializer = new XMLSerializer();
       return serializer.serializeToString(svgEl);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (e) {
       return svgStr;
     }
   };
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth sx={{borderRadius:4}}>
+    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth sx={{ borderRadius: 4 }}>
       <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#263238', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>
         Crear/Editar Elemento SVG
-        </DialogTitle>
+      </DialogTitle>
       <DialogContent>
         <TextField
           autoFocus
@@ -461,7 +459,7 @@ const SvgEditorDialog: React.FC<Props> = ({
           </>
         )}
 
-        
+
 
         <Box style={{ marginTop: 12 }}>
           <Typography variant="subtitle2">Elementos guardados</Typography>
@@ -487,8 +485,8 @@ const SvgEditorDialog: React.FC<Props> = ({
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button onClick={handleClearAll} color="error" startIcon={<DeleteIcon />}>Limpiar</Button>
-        <Button onClick={onClose} color="warning" startIcon={<CloseIcon />}>Cancelar</Button>
+        <Button onClick={handleClearAll} color="error" startIcon={<span className="material-symbols-rounded">delete</span>}>Limpiar</Button>
+        <Button onClick={onClose} color="warning" startIcon={<span className="material-symbols-rounded">close</span>}>Cancelar</Button>
         <Button
           onClick={async () => {
             try {
@@ -503,7 +501,7 @@ const SvgEditorDialog: React.FC<Props> = ({
               try { window.dispatchEvent(new CustomEvent('svg-elements-updated')); } catch { /* ignore */ }
             }
           }}
-          startIcon={<SaveIcon />}
+          startIcon={<span className="material-symbols-rounded">save</span>}
           variant="contained"
         >Guardar</Button>
       </DialogActions>

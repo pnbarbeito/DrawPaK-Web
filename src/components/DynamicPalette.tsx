@@ -4,7 +4,7 @@ import {
 
   Typography, Accordion, AccordionSummary, AccordionDetails
 } from '@mui/material';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+// Replaced ExpandMoreIcon with material symbol span
 import { getSvgElementsByCategory, getSvgCategories } from './database.ts';
 import type { SvgElement } from './database.ts';
 
@@ -109,7 +109,7 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
   if (loading) {
     return (
       <Box sx={{ position: 'absolute', left: 12, top: 72, width: 160, background: 'rgba(0, 0, 0, 0.6)', p: 1, borderRadius: 1, zIndex: 1200 }}>
-        <Typography variant="h6" sx={{ width: '100%', textAlign: 'center', fontSize: 14, fontWeight: 600, mb: 1, color:'white' }}>Paleta</Typography>
+        <Typography variant="h6" sx={{ width: '100%', textAlign: 'center', fontSize: 14, fontWeight: 600, mb: 1, color: 'white' }}>Paleta</Typography>
         <Typography variant="body2" sx={{ fontSize: 12, color: '#fff' }}>
           Cargando elementos...
         </Typography>
@@ -129,9 +129,9 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
           </Typography>
         ) : (
           Object.entries(elementsByCategory).map(([category, elements]) => (
-            <Accordion key={category} defaultExpanded={category === 'transformadores'} sx={{ marginBottom: 1,backgroundColor: 'rgba(0, 0, 0, 0.6)', color: '#fff' }}>
+            <Accordion key={category} defaultExpanded={category === 'transformadores'} sx={{ marginBottom: 1, backgroundColor: 'rgba(0, 0, 0, 0.6)', color: '#fff' }}>
               <AccordionSummary
-                expandIcon={<ExpandMoreIcon sx={{color:'white'}}/>}
+                expandIcon={<span className="material-symbols-rounded" style={{ color: 'white' }}>expand_more</span>}
                 sx={{
                   padding: '4px 8px',
                   minHeight: '32px',
@@ -208,7 +208,7 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
 
                                   const serializer = new XMLSerializer();
                                   return serializer.serializeToString(svgEl);
-                                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                                  // eslint-disable-next-line @typescript-eslint/no-unused-vars
                                 } catch (e) {
                                   return element.svg || '';
                                 }

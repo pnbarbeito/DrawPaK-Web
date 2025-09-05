@@ -213,7 +213,7 @@ export async function getSvgElementById(id: number): Promise<SvgElement | null> 
 export async function getSvgElementsByCategory(category: string): Promise<SvgElement[]> {
   await initDatabase();
   const all = await db.svg_elements.where('category').equals(category).toArray();
-  return all.sort((a,b) => (a.name||'').localeCompare(b.name || ''));
+  return all.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 }
 
 export async function getSvgCategories(): Promise<string[]> {
@@ -253,19 +253,19 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
     // Verificar si ya existen elementos básicos (usar conteo directo para evitar reentradas)
     const count = await db.svg_elements.count();
     if (count > 0) {
-      console.log('Elementos básicos ya están inicializados');
+      //console.log('Elementos básicos ya están inicializados');
       return;
     }
 
-    console.log('Inicializando elementos básicos desde symbols.data.tsx...');
+    //console.log('Inicializando elementos básicos desde symbols.data.tsx...');
 
-  // Transformadores
-  const transformadores = [
-    {
-      name: 'Transformador',
-      description: 'Transformador básico',
-      category: 'transformadores',
-      svg: `
+    // Transformadores
+    const transformadores = [
+      {
+        name: 'Transformador',
+        description: 'Transformador básico',
+        category: 'transformadores',
+        svg: `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" style="background: rgba(255, 255, 255, 0);">
         <defs xmlns="http://www.w3.org/2000/svg"/>
         <g xmlns="http://www.w3.org/2000/svg">
@@ -290,16 +290,16 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
             </g>
         </g>
     </svg>`,
-      handles: JSON.stringify([
-        { id: 'top', x: 60, y: 0, type: 'source' },
-        { id: 'bottom', x: 60, y: 120, type: 'target' }
-      ])
-    },
-    {
-      name: 'Transformador Doble',
-      description: 'Transformador con doble salida',
-      category: 'transformadores',
-      svg: `
+        handles: JSON.stringify([
+          { id: 'top', x: 60, y: 0, type: 'source' },
+          { id: 'bottom', x: 60, y: 120, type: 'target' }
+        ])
+      },
+      {
+        name: 'Transformador Doble',
+        description: 'Transformador con doble salida',
+        category: 'transformadores',
+        svg: `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 160" style="background: rgba(255, 255, 255, 0);">
           <defs xmlns="http://www.w3.org/2000/svg"/>
           <g xmlns="http://www.w3.org/2000/svg">
@@ -334,21 +334,21 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
               </g>
           </g>
       </svg>`,
-      handles: JSON.stringify([
-        { id: 'top', x: 60, y: 0, type: 'source' },
-        { id: 'left', x: 40, y: 160, type: 'target' },
-        { id: 'right', x: 80, y: 160, type: 'target' }
-      ])
-    }
-  ];
+        handles: JSON.stringify([
+          { id: 'top', x: 60, y: 0, type: 'source' },
+          { id: 'left', x: 40, y: 160, type: 'target' },
+          { id: 'right', x: 80, y: 160, type: 'target' }
+        ])
+      }
+    ];
 
-  // Protección
-  const proteccion = [
-    {
-      name: 'Interruptor',
-      description: 'Interruptor',
-      category: 'proteccion',
-      svg: `
+    // Protección
+    const proteccion = [
+      {
+        name: 'Interruptor',
+        description: 'Interruptor',
+        category: 'proteccion',
+        svg: `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" style="background: rgba(255, 255, 255, 0);">
           <defs xmlns="http://www.w3.org/2000/svg"/>
           <g xmlns="http://www.w3.org/2000/svg">
@@ -383,26 +383,26 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
               </g>
           </g>
       </svg>`,
-      handles: JSON.stringify([
-        {
-          "id": "left",
-          "type": "source",
-          "x": 0,
-          "y": 40
-        },
-        {
-          "id": "right",
-          "type": "target",
-          "x": 120,
-          "y": 40
-        }
-      ])
-    },
-    {
-      name: 'Interruptor Extraido',
-      description: 'Interruptor',
-      category: 'proteccion',
-      svg: `
+        handles: JSON.stringify([
+          {
+            "id": "left",
+            "type": "source",
+            "x": 0,
+            "y": 40
+          },
+          {
+            "id": "right",
+            "type": "target",
+            "x": 120,
+            "y": 40
+          }
+        ])
+      },
+      {
+        name: 'Interruptor Extraido',
+        description: 'Interruptor',
+        category: 'proteccion',
+        svg: `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120" style="background: rgba(255, 255, 255, 0);">
           <defs xmlns="http://www.w3.org/2000/svg"/>
           <g xmlns="http://www.w3.org/2000/svg">
@@ -457,26 +457,26 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
               </g>
           </g>
       </svg>`,
-      handles: JSON.stringify([
-        {
-          "id": "left",
-          "type": "source",
-          "x": 0,
-          "y": 100
-        },
-        {
-          "id": "right",
-          "type": "target",
-          "x": 200,
-          "y": 100
-        }
-      ])
-    },
-    {
-      name: 'Seccionador',
-      description: 'Seccionador de línea',
-      category: 'proteccion',
-      svg: `
+        handles: JSON.stringify([
+          {
+            "id": "left",
+            "type": "source",
+            "x": 0,
+            "y": 100
+          },
+          {
+            "id": "right",
+            "type": "target",
+            "x": 200,
+            "y": 100
+          }
+        ])
+      },
+      {
+        name: 'Seccionador',
+        description: 'Seccionador de línea',
+        category: 'proteccion',
+        svg: `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" style="background: rgba(255, 255, 255, 0);">
           <defs xmlns="http://www.w3.org/2000/svg"/>
           <g xmlns="http://www.w3.org/2000/svg">
@@ -505,30 +505,30 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
               </g>
           </g>
       </svg>`,
-      handles: JSON.stringify([
-        {
-          "id": "left",
-          "type": "source",
-          "x": 0,
-          "y": 40
-        },
-        {
-          "id": "right",
-          "type": "target",
-          "x": 120,
-          "y": 40
-        }
-      ])
-    }
-  ];
+        handles: JSON.stringify([
+          {
+            "id": "left",
+            "type": "source",
+            "x": 0,
+            "y": 40
+          },
+          {
+            "id": "right",
+            "type": "target",
+            "x": 120,
+            "y": 40
+          }
+        ])
+      }
+    ];
 
-  // Infraestructura
-  const infraestructura = [
-    {
-      name: 'Barra Simple',
-      description: 'Barras de conexión',
-      category: 'infraestructura',
-      svg: `
+    // Infraestructura
+    const infraestructura = [
+      {
+        name: 'Barra Simple',
+        description: 'Barras de conexión',
+        category: 'infraestructura',
+        svg: `
       <svg xmlns="http://www.w3.org/2000/svg" style="background: rgba(255, 255, 255, 0);" viewBox="0 0 200 200">
           <defs xmlns="http://www.w3.org/2000/svg"/>
           <g xmlns="http://www.w3.org/2000/svg">
@@ -543,32 +543,32 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
               </g>
           </g>
       </svg>`,
-      handles: JSON.stringify([
-        {
-          "id": "h_1756826687664",
-          "type": "target",
-          "x": 40,
-          "y": 200
-        },
-        {
-          "id": "h_1756829757274",
-          "type": "source",
-          "x": 40,
-          "y": 0
-        },
-        {
-          "id": "h_1756829764787",
-          "type": "target",
-          "x": 200,
-          "y": 100
-        }
-      ])
-    },
-    {
-      name: 'Barra Doble',
-      description: 'Barras de conexión',
-      category: 'infraestructura',
-      svg: `
+        handles: JSON.stringify([
+          {
+            "id": "h_1756826687664",
+            "type": "target",
+            "x": 40,
+            "y": 200
+          },
+          {
+            "id": "h_1756829757274",
+            "type": "source",
+            "x": 40,
+            "y": 0
+          },
+          {
+            "id": "h_1756829764787",
+            "type": "target",
+            "x": 200,
+            "y": 100
+          }
+        ])
+      },
+      {
+        name: 'Barra Doble',
+        description: 'Barras de conexión',
+        category: 'infraestructura',
+        svg: `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" style="background: rgba(255, 255, 255, 0);">
           <defs xmlns="http://www.w3.org/2000/svg"/>
           <g xmlns="http://www.w3.org/2000/svg">
@@ -593,50 +593,50 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
               </g>
           </g>
       </svg>`,
-      handles: JSON.stringify([
-        {
-          "id": "h_1756826687664",
-          "type": "target",
-          "x": 40,
-          "y": 200
-        },
-        {
-          "id": "h_1756826687995",
-          "type": "source",
-          "x": 40,
-          "y": 0
-        },
-        {
-          "id": "h_1756826670572",
-          "type": "target",
-          "x": 80,
-          "y": 200
-        },
-        {
-          "id": "h_1756826671210",
-          "type": "source",
-          "x": 80,
-          "y": 0
-        },
-        {
-          "id": "r_top",
-          "type": "target",
-          "x": 200,
-          "y": 40
-        },
-        {
-          "id": "b_right",
-          "type": "target",
-          "x": 200,
-          "y": 160
-        }
-      ])
-    },
-    {
-      name: 'Barra Triple',
-      description: 'Barras de conexión',
-      category: 'infraestructura',
-      svg: `
+        handles: JSON.stringify([
+          {
+            "id": "h_1756826687664",
+            "type": "target",
+            "x": 40,
+            "y": 200
+          },
+          {
+            "id": "h_1756826687995",
+            "type": "source",
+            "x": 40,
+            "y": 0
+          },
+          {
+            "id": "h_1756826670572",
+            "type": "target",
+            "x": 80,
+            "y": 200
+          },
+          {
+            "id": "h_1756826671210",
+            "type": "source",
+            "x": 80,
+            "y": 0
+          },
+          {
+            "id": "r_top",
+            "type": "target",
+            "x": 200,
+            "y": 40
+          },
+          {
+            "id": "b_right",
+            "type": "target",
+            "x": 200,
+            "y": 160
+          }
+        ])
+      },
+      {
+        name: 'Barra Triple',
+        description: 'Barras de conexión',
+        category: 'infraestructura',
+        svg: `
       <svg xmlns="http://www.w3.org/2000/svg" style="background: rgba(255, 255, 255, 0);" viewBox="0 0 200 200">
           <defs xmlns="http://www.w3.org/2000/svg"/>
           <g xmlns="http://www.w3.org/2000/svg">
@@ -671,72 +671,72 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
               </g>
           </g>
       </svg>`,
-      handles: JSON.stringify([
-        {
-          "id": "h_1756826687664",
-          "type": "target",
-          "x": 20,
-          "y": 200
-        },
-        {
-          "id": "h_1756830053495",
-          "type": "source",
-          "x": 20,
-          "y": 0
-        },
-        {
-          "id": "h_1756830129231",
-          "type": "target",
-          "x": 60,
-          "y": 200
-        },
-        {
-          "id": "h_1756826687995",
-          "type": "source",
-          "x": 60,
-          "y": 0
-        },
-        {
-          "id": "h_1756826671210",
-          "type": "source",
-          "x": 100,
-          "y": 0
-        },
-        {
-          "id": "r_top",
-          "type": "target",
-          "x": 200,
-          "y": 40
-        },
-        {
-          "id": "h_1756826670572",
-          "type": "target",
-          "x": 100,
-          "y": 200
-        },
-        {
-          "id": "b_right",
-          "type": "target",
-          "x": 200,
-          "y": 160
-        },
-        {
-          "id": "h_1756830118484",
-          "type": "target",
-          "x": 200,
-          "y": 100
-        }
-      ])
-    }
-  ];
+        handles: JSON.stringify([
+          {
+            "id": "h_1756826687664",
+            "type": "target",
+            "x": 20,
+            "y": 200
+          },
+          {
+            "id": "h_1756830053495",
+            "type": "source",
+            "x": 20,
+            "y": 0
+          },
+          {
+            "id": "h_1756830129231",
+            "type": "target",
+            "x": 60,
+            "y": 200
+          },
+          {
+            "id": "h_1756826687995",
+            "type": "source",
+            "x": 60,
+            "y": 0
+          },
+          {
+            "id": "h_1756826671210",
+            "type": "source",
+            "x": 100,
+            "y": 0
+          },
+          {
+            "id": "r_top",
+            "type": "target",
+            "x": 200,
+            "y": 40
+          },
+          {
+            "id": "h_1756826670572",
+            "type": "target",
+            "x": 100,
+            "y": 200
+          },
+          {
+            "id": "b_right",
+            "type": "target",
+            "x": 200,
+            "y": 160
+          },
+          {
+            "id": "h_1756830118484",
+            "type": "target",
+            "x": 200,
+            "y": 100
+          }
+        ])
+      }
+    ];
 
-  // Seguridad
-  const seguridad = [
-    {
-      name: 'Candado',
-      description: 'Dispositivo de bloqueo',
-      category: 'seguridad',
-      svg: `
+    // Seguridad
+    const seguridad = [
+      {
+        name: 'Candado',
+        description: 'Dispositivo de bloqueo',
+        category: 'seguridad',
+        svg: `
       <svg xmlns="http://www.w3.org/2000/svg" style="background: rgba(255, 255, 255, 0);" viewBox="0 0 60 60">
           <defs xmlns="http://www.w3.org/2000/svg"/>
           <g xmlns="http://www.w3.org/2000/svg">
@@ -761,13 +761,13 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
               </g>
           </g>
       </svg>`,
-      handles: "[]"
-    },
-    {
-      name: 'Bloqueo',
-      description: 'Zona de bloqueo',
-      category: 'seguridad',
-      svg: `
+        handles: "[]"
+      },
+      {
+        name: 'Bloqueo',
+        description: 'Zona de bloqueo',
+        category: 'seguridad',
+        svg: `
       <svg xmlns="http://www.w3.org/2000/svg" style="background: rgba(255, 255, 255, 0);" viewBox="0 0 80 80">
           <defs xmlns="http://www.w3.org/2000/svg"/>
           <g xmlns="http://www.w3.org/2000/svg">
@@ -776,13 +776,13 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
               </g>
           </g>
       </svg>`,
-      handles: "[]"
-    },
-    {
-      name: 'Puesta a Tierra',
-      description: 'Conexión a tierra',
-      category: 'seguridad',
-      svg: `
+        handles: "[]"
+      },
+      {
+        name: 'Puesta a Tierra',
+        description: 'Conexión a tierra',
+        category: 'seguridad',
+        svg: `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" style="background: rgba(255, 255, 255, 0);">
           <defs xmlns="http://www.w3.org/2000/svg"/>
           <g xmlns="http://www.w3.org/2000/svg">
@@ -812,15 +812,15 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
               </g>
           </g>
       </svg>`,
-      handles: JSON.stringify([
-        { id: 'top', x: 20, y: 0, type: 'source' }
-      ])
-    }
-  ];
+        handles: JSON.stringify([
+          { id: 'top', x: 20, y: 0, type: 'source' }
+        ])
+      }
+    ];
 
-  // Guardar todos los elementos en una transacción usando la tabla directa para evitar
-  // llamadas a helpers que puedan re-inicializar la DB.
-  const allElements = [...transformadores, ...proteccion, ...infraestructura, ...seguridad];
+    // Guardar todos los elementos en una transacción usando la tabla directa para evitar
+    // llamadas a helpers que puedan re-inicializar la DB.
+    const allElements = [...transformadores, ...proteccion, ...infraestructura, ...seguridad];
     try {
       await db.transaction('rw', db.svg_elements, async () => {
         for (const element of allElements) {
@@ -831,7 +831,7 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
             .and(e => (e.category || 'basic') === (element.category || 'basic'))
             .first();
           if (exists) {
-            console.log(`Elemento ya existe, saltando: ${element.name} (${element.category})`);
+            //console.log(`Elemento ya existe, saltando: ${element.name} (${element.category})`);
             continue;
           }
 
@@ -845,10 +845,10 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
             updated_at: nowIso()
           };
           await db.svg_elements.add(elem);
-          console.log(`Elemento guardado: ${element.name} (${element.category})`);
+          //console.log(`Elemento guardado: ${element.name} (${element.category})`);
         }
       });
-      console.log('Elementos básicos inicializados correctamente');
+      //console.log('Elementos básicos inicializados correctamente');
     } catch (err) {
       console.error('Error inicializando elementos básicos:', err);
     } finally {

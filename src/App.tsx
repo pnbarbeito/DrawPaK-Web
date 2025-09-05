@@ -1,5 +1,5 @@
 import './App.css'
-import FlowApp from './components/Diagram'
+import FlowApp from './components/FlowApp'
 
 function App() {
   return <FlowApp />;

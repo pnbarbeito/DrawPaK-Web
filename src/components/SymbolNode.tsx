@@ -29,7 +29,7 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
   React.useEffect(() => {
     if (isDynamicSvg && dynamicSvg && dynamicHandles && !preservedSvgData) {
       setPreservedSvgData({ svg: dynamicSvg, handles: dynamicHandles });
-      console.log(`💾 Preserving SVG data for ${id}:`, { svgLength: dynamicSvg.length });
+      //(`💾 Preserving SVG data for ${id}:`, { svgLength: dynamicSvg.length });
     }
   }, [isDynamicSvg, dynamicSvg, dynamicHandles, preservedSvgData, id]);
 
@@ -38,6 +38,7 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
   const effectiveHandles = dynamicHandles || preservedSvgData?.handles;
 
   // Debug logging detallado
+  /*
   console.log(`🔍 SymbolNode ${id} render:`, {
     symbolKey,
     isDynamicSvg,
@@ -49,7 +50,7 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
     hasPreservedData: !!preservedSvgData,
     allDataKeys: Object.keys(data)
   });
-
+  */
   // Si tenemos un elemento SVG dinámico, usarlo; sino, usar el símbolo estático
   let entry: SymbolEntry | undefined;
   let symbol: React.ReactNode = null;
@@ -102,13 +103,14 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
 
   // Usar React.memo para memorizar el SVG y evitar pérdida de datos
   const renderedSymbol = React.useMemo(() => {
+    /*
     console.log(`🧠 useMemo triggered for ${id}:`, {
       hasInlineSvg: !!inlineSvgMarkup,
       hasSymbol: !!symbol,
       symbolKey,
       svgPreview: inlineSvgMarkup ? inlineSvgMarkup.substring(0, 100) + '...' : 'none'
     });
-
+    */
     if (inlineSvgMarkup) {
       return (
         <div
@@ -152,6 +154,8 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
     if (!inlineWrapperRef.current) return;
     const svgEl = inlineWrapperRef.current.querySelector('svg') as SVGSVGElement | null;
     if (!svgEl) return;
+    const backgroundColor = (data as unknown as { backgroundColor?: string }).backgroundColor;
+    const primaryColor = (data as unknown as { primaryColor?: string }).primaryColor;
 
     try {
       // If no viewBox but width/height attributes exist, set viewBox from them
@@ -170,6 +174,18 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
       svgEl.setAttribute('width', String(size.w));
       svgEl.setAttribute('height', String(size.h));
 
+      // Apply color customizations if provided
+      if (primaryColor) {
+        try {
+          svgEl.querySelectorAll('[stroke]').forEach((n) => { (n as Element).setAttribute('stroke', primaryColor); });
+          svgEl.querySelectorAll('[fill]').forEach((n) => { (n as Element).setAttribute('fill', (n as Element).getAttribute('fill') === 'none' ? 'none' : primaryColor); });
+        } catch { /* ignore */ }
+      }
+
+      if (backgroundColor) {
+        svgEl.style.background = backgroundColor;
+      }
+
       // Ensure it visually fills the wrapper
       svgEl.style.width = '100%';
       svgEl.style.height = '100%';
@@ -178,7 +194,7 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
     } catch {
       // swallow DOM errors
     }
-  }, [inlineSvgMarkup, size.w, size.h]);
+  }, [inlineSvgMarkup, size.w, size.h, data]);
   const rotation = data.rotation ?? 0;
   const scale = data.scale ?? 1;
   const flipX = data.flipX ?? false;

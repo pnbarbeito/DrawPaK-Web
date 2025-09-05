@@ -1,10 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Box, Button, TextField, Checkbox, FormControlLabel, Slider, Typography } from '@mui/material';
-import AddBoxIcon from '@mui/icons-material/AddBox';
-import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
-import DeleteIcon from '@mui/icons-material/Delete';
-import HorizontalRuleIcon from '@mui/icons-material/HorizontalRule';
-import CableIcon from '@mui/icons-material/Cable';
+// Replaced MUI icons with material symbol spans
 type Handle = { id: string; x: number; y: number; type?: 'source' | 'target' };
 type BaseShape = {
   id: string;
@@ -748,22 +744,22 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
     <Box>
       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1, flexWrap: 'wrap' }}>
         <Box>
-          <Button variant="contained" startIcon={<AddBoxIcon />} onClick={addRect}>Rectángulo</Button>
+          <Button variant="contained" startIcon={<span className="material-symbols-rounded">add_box</span>} onClick={addRect}>Rectángulo</Button>
         </Box>
         <Box>
-          <Button variant="contained" startIcon={<RadioButtonUncheckedIcon />} onClick={addCircle}>Círculo</Button>
+          <Button variant="contained" startIcon={<span className="material-symbols-rounded">radio_button_unchecked</span>} onClick={addCircle}>Círculo</Button>
         </Box>
         <Box>
-          <Button variant="contained" onClick={addSemi}>Semicírculo</Button>
+          <Button variant="contained" startIcon={<span className="material-symbols-rounded">line_curve</span>} onClick={addSemi}>Semicírculo</Button>
         </Box>
         <Box>
-          <Button variant="contained" startIcon={<HorizontalRuleIcon />} onClick={addLine}>Línea</Button>
+          <Button variant="contained" startIcon={<span className="material-symbols-rounded">horizontal_rule</span>} onClick={addLine}>Línea</Button>
         </Box>
         <Box>
-          <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={deleteSelectedShape} disabled={!selected}>Borrar</Button>
+          <Button variant="outlined" color="error" startIcon={<span className="material-symbols-rounded">delete</span>} onClick={deleteSelectedShape} disabled={!selected}>Borrar</Button>
         </Box>
         <Box>
-          <Button variant="outlined" onClick={addHandleToSelected} startIcon={<CableIcon />} disabled={!selected}>Añadir handle</Button>
+          <Button variant="outlined" onClick={addHandleToSelected} startIcon={<span className="material-symbols-rounded">cable</span>} disabled={!selected}>Añadir handle</Button>
         </Box>
         {/* Z-order controls moved into the selected-shape properties panel */}
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
@@ -773,22 +769,19 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
       </Box>
 
       <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        <Box sx={{ border: '1px solid #ddd', width: (canvasWidth + 1) * effectiveDisplayScale, height: (canvasHeight + 5) * effectiveDisplayScale, overflow: 'auto' }}>
+        <Box sx={{ border: '1px solid #ddd', width: (canvasWidth) * effectiveDisplayScale, height: (canvasHeight) * effectiveDisplayScale, overflow: 'hidden' }}>
           <svg
             ref={svgRef}
-            // visual size is scaled, user draws in logical coordinates via viewBox
+            viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
             width={canvasWidth * effectiveDisplayScale}
             height={canvasHeight * effectiveDisplayScale}
-            viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
             style={{ background: 'rgba(255, 255, 255, 0.0)' }}
             onMouseDown={(e) => {
-              const target = e.target as Element;
+              const target = e.target as EventTarget | null;
               if (target === svgRef.current) {
                 setTimeout(() => {
-                  if (!justFinishedDrag.current) {
-                    setSelected(null);
-                    updateDragState(null);
-                  }
+                  setSelected(null);
+                  updateDragState(null);
                 }, 10);
               }
             }}
