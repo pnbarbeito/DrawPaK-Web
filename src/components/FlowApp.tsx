@@ -222,6 +222,7 @@ function FlowApp(): React.ReactElement {
   // Estado para polígonos
   const [isDrawingPolygon, setIsDrawingPolygon] = React.useState(false);
   const [currentPolygonPoints, setCurrentPolygonPoints] = React.useState<PolygonPoint[]>([]);
+  const [mousePosition, setMousePosition] = React.useState<PolygonPoint | null>(null);
   const [svgDescription, setSvgDescription] = React.useState('');
   const [svgCategory, setSvgCategory] = React.useState('custom');
   const [svgMarkup, setSvgMarkup] = React.useState('');
@@ -445,14 +446,22 @@ function FlowApp(): React.ReactElement {
 
   // Función para manejar el clic del botón guardar
   const handleSaveButtonClick = useCallback(() => {
-    // Si hay un esquema actual, guardar directamente sin abrir diálogo
+    console.log('handleSaveButtonClick called, currentSchemaId:', currentSchemaId);
+    
+    // Si hay un esquema actual, pre-llenar los campos con los datos actuales
     if (currentSchemaId) {
-      handleSaveSchema();
+      console.log('Opening save dialog for existing schema');
+      setSchemaName(currentSchemaName || '');
+      setSchemaDescription(''); // Podrías agregar currentSchemaDescription si existe
     } else {
-      // Si no hay esquema actual, abrir diálogo para pedir nombre
-      setShowSaveDialog(true);
+      console.log('Opening save dialog for new schema');
+      setSchemaName('');
+      setSchemaDescription('');
     }
-  }, [currentSchemaId, handleSaveSchema]);
+    
+    // Siempre abrir el diálogo para permitir editar nombre/descripción
+    setShowSaveDialog(true);
+  }, [currentSchemaId, currentSchemaName]);
 
   const handleLoadSchema = useCallback(async (schema: Schema) => {
     try {
@@ -607,8 +616,8 @@ function FlowApp(): React.ReactElement {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(schemaData));
 
       // Guardar también el ID del esquema actual por separado
-      if (schemaId !== null || currentSchemaId !== null) {
-        localStorage.setItem(CURRENT_SCHEMA_KEY, String(schemaId || currentSchemaId));
+      if (schemaId !== null) {
+        localStorage.setItem(CURRENT_SCHEMA_KEY, String(schemaId));
       } else {
         localStorage.removeItem(CURRENT_SCHEMA_KEY);
       }
@@ -706,7 +715,17 @@ function FlowApp(): React.ReactElement {
   // Guardar automáticamente cuando cambien los nodos o edges
   React.useEffect(() => {
     if (nodes.length > 0 || edges.length > 0) {
+      // Solo guardar el ID del esquema si realmente hay uno activo
+      // Si currentSchemaId es null, significa que es un esquema nuevo
       saveToLocalStorage(nodes, edges, currentSchemaId, currentSchemaName);
+    } else {
+      // Si no hay nodos ni edges, limpiar localStorage
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(CURRENT_SCHEMA_KEY);
+      } catch (error) {
+        console.error('Error limpiando localStorage:', error);
+      }
     }
   }, [nodes, edges, saveToLocalStorage, currentSchemaId, currentSchemaName]);
 
@@ -902,15 +921,18 @@ function FlowApp(): React.ReactElement {
   }, [setNodes, setEdges, setCurrentSchemaId, setCurrentSchemaName]);
 
   const handleNewSchema = useCallback(() => {
+    console.log('handleNewSchema called, current ID:', currentSchemaId);
     if (isHandlingNewSchema) {
       return;
     }
 
     // Solo mostrar confirmación si hay contenido
     if (nodes.length > 0 || edges.length > 0) {
+      console.log('Content exists, showing confirmation dialog');
       // there is content, show confirmation dialog
       setShowNewSchemaConfirm(true);
     } else {
+      console.log('No content, clearing directly');
       // Si no hay contenido, limpiar directamente
       // no content, clearing directly
       handleClearAll();
@@ -985,12 +1007,56 @@ function FlowApp(): React.ReactElement {
     // pasted nodes and edges
   }, [clipboard, setNodes, setEdges, nodes]);
 
+  // Efectos para aplicar estilos dinámicos del cursor
+  React.useEffect(() => {
+    const styleId = 'polygon-cursor-style';
+    let existingStyle = document.getElementById(styleId) as HTMLStyleElement;
+    
+    if (!existingStyle) {
+      existingStyle = document.createElement('style');
+      existingStyle.id = styleId;
+      document.head.appendChild(existingStyle);
+    }
+
+    if (isDrawingPolygon) {
+      existingStyle.textContent = `
+        .polygon-drawing-mode .react-flow__pane,
+        .polygon-drawing-mode .react-flow__container,
+        .polygon-drawing-mode .react-flow__renderer,
+        .polygon-drawing-mode {
+          cursor: crosshair !important;
+        }
+        .polygon-drawing-mode .react-flow__node {
+          cursor: crosshair !important;
+        }
+        .polygon-drawing-mode .react-flow__edge {
+          cursor: crosshair !important;
+        }
+      `;
+    } else {
+      existingStyle.textContent = '';
+    }
+
+    return () => {
+      // Limpiar estilos al desmontar o cambiar
+      if (existingStyle && !isDrawingPolygon) {
+        existingStyle.textContent = '';
+      }
+    };
+  }, [isDrawingPolygon]);
+
+  // Debug para el diálogo de guardar
+  React.useEffect(() => {
+    console.log('showSaveDialog state changed:', showSaveDialog);
+  }, [showSaveDialog]);
+
   // Funciones para manejo de polígonos
   const togglePolygonMode = useCallback(() => {
     setIsDrawingPolygon(prev => !prev);
     // Si estamos saliendo del modo polígono, limpiar puntos temporales
     if (isDrawingPolygon) {
       setCurrentPolygonPoints([]);
+      setMousePosition(null);
     }
   }, [isDrawingPolygon]);
 
@@ -1047,13 +1113,31 @@ function FlowApp(): React.ReactElement {
 
     // Limpiar estado
     setCurrentPolygonPoints([]);
+    setMousePosition(null);
     setIsDrawingPolygon(false);
   }, [currentPolygonPoints, setNodes]);
 
   const cancelPolygon = useCallback(() => {
     setCurrentPolygonPoints([]);
     setIsDrawingPolygon(false);
+    setMousePosition(null);
   }, []);
+
+  const handlePolygonMouseMove = useCallback((event: React.MouseEvent) => {
+    if (!isDrawingPolygon || !reactFlowWrapper.current || !reactFlowInstance.current) return;
+
+    const rect = reactFlowWrapper.current.getBoundingClientRect();
+    const position = reactFlowInstance.current.project({
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    });
+
+    if (position) {
+      // Snap to grid
+      const snappedPosition = snapToGridPos(position, GRID_SIZE);
+      setMousePosition(snappedPosition);
+    }
+  }, [isDrawingPolygon]);
 
   // ...existing code... (exportWithoutBackground moved inside export callbacks)
 
@@ -1572,9 +1656,9 @@ function FlowApp(): React.ReactElement {
           <ReactFlow
             style={{ 
               width: '100%', 
-              height: '100%',
-              cursor: isDrawingPolygon ? 'crosshair' : 'default'
+              height: '100%'
             }}
+            className={isDrawingPolygon ? 'polygon-drawing-mode' : ''}
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
@@ -1582,6 +1666,7 @@ function FlowApp(): React.ReactElement {
             onConnect={onConnect}
             onNodeDragStop={onNodeDragStop}
             onPaneClick={addPolygonPoint}
+            onPaneMouseMove={handlePolygonMouseMove}
             snapToGrid={true}
             snapGrid={snapGrid}
             connectionLineType={ConnectionLineType.SmoothStep}
@@ -1715,6 +1800,31 @@ function FlowApp(): React.ReactElement {
                   />
                 );
               })}
+              
+              {/* Línea de previsualización desde el último punto hasta el cursor */}
+              {currentPolygonPoints.length > 0 && mousePosition && reactFlowInstance.current && (
+                (() => {
+                  const lastPoint = currentPolygonPoints[currentPolygonPoints.length - 1];
+                  const reactFlowRect = reactFlowWrapper.current?.getBoundingClientRect();
+                  if (!reactFlowRect) return null;
+                  
+                  const screenPoint1 = reactFlowInstance.current.flowToScreenPosition(lastPoint);
+                  const screenPoint2 = reactFlowInstance.current.flowToScreenPosition(mousePosition);
+                  
+                  return (
+                    <line
+                      x1={screenPoint1.x - reactFlowRect.left}
+                      y1={screenPoint1.y - reactFlowRect.top}
+                      x2={screenPoint2.x - reactFlowRect.left}
+                      y2={screenPoint2.y - reactFlowRect.top}
+                      stroke="#2196F3"
+                      strokeWidth="2"
+                      strokeDasharray="3,3"
+                      opacity="0.7"
+                    />
+                  );
+                })()
+              )}
               
               {/* Puntos del polígono */}
               {currentPolygonPoints.map((point, index) => {
