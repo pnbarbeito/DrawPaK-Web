@@ -222,8 +222,6 @@ function FlowApp(): React.ReactElement {
   // Estado para polígonos
   const [isDrawingPolygon, setIsDrawingPolygon] = React.useState(false);
   const [currentPolygonPoints, setCurrentPolygonPoints] = React.useState<PolygonPoint[]>([]);
-  const [tempPolygonPoints, setTempPolygonPoints] = React.useState<PolygonPoint[]>([]);
-  const [showPolygonPreview, setShowPolygonPreview] = React.useState(false);
   const [svgDescription, setSvgDescription] = React.useState('');
   const [svgCategory, setSvgCategory] = React.useState('custom');
   const [svgMarkup, setSvgMarkup] = React.useState('');
@@ -993,8 +991,6 @@ function FlowApp(): React.ReactElement {
     // Si estamos saliendo del modo polígono, limpiar puntos temporales
     if (isDrawingPolygon) {
       setCurrentPolygonPoints([]);
-      setTempPolygonPoints([]);
-      setShowPolygonPreview(false);
     }
   }, [isDrawingPolygon]);
 
@@ -1018,7 +1014,6 @@ function FlowApp(): React.ReactElement {
       const snappedPosition = snapToGridPos(position, GRID_SIZE);
       
       setCurrentPolygonPoints(prev => [...prev, snappedPosition]);
-      setShowPolygonPreview(true);
     }
   }, [isDrawingPolygon]);
 
@@ -1052,15 +1047,11 @@ function FlowApp(): React.ReactElement {
 
     // Limpiar estado
     setCurrentPolygonPoints([]);
-    setTempPolygonPoints([]);
-    setShowPolygonPreview(false);
     setIsDrawingPolygon(false);
   }, [currentPolygonPoints, setNodes]);
 
   const cancelPolygon = useCallback(() => {
     setCurrentPolygonPoints([]);
-    setTempPolygonPoints([]);
-    setShowPolygonPreview(false);
     setIsDrawingPolygon(false);
   }, []);
 
