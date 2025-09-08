@@ -37,20 +37,22 @@ const PolygonNode: React.FC<PolygonNodeProps> = ({ data, selected }) => {
   const maxX = Math.max(...points.map(p => p.x));
   const maxY = Math.max(...points.map(p => p.y));
 
-  const width = maxX - minX + 20; // Padding adicional
-  const height = maxY - minY + 20;
+  // Use a consistent inner padding so node position and rendered points align
+  const PADDING = 0;
+  const width = maxX - minX + PADDING * 2;
+  const height = maxY - minY + PADDING * 2;
 
-  // Ajustar puntos relativos al nodo
+  // Ajustar puntos relativos al nodo (compensando el padding)
   const relativePoints = points.map(p => ({
-    x: p.x - minX + 10,
-    y: p.y - minY + 10
+    x: p.x - minX + PADDING,
+    y: p.y - minY + PADDING
   }));
 
   // Crear path SVG
   const pathData = relativePoints.length > 0
     ? `M ${relativePoints[0].x} ${relativePoints[0].y} ` +
-      relativePoints.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ') +
-      (relativePoints.length > 2 ? ' Z' : '') // Cerrar polígono si hay más de 2 puntos
+    relativePoints.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ') +
+    (relativePoints.length > 2 ? ' Z' : '') // Cerrar polígono si hay más de 2 puntos
     : '';
 
   return (
@@ -59,7 +61,7 @@ const PolygonNode: React.FC<PolygonNodeProps> = ({ data, selected }) => {
         width,
         height,
         position: 'relative',
-        pointerEvents: 'none' // Permitir clicks a través del polígono
+        pointerEvents: 'auto' // Allow the node container to receive pointer events so selection works correctly
       }}
     >
       <svg
@@ -81,7 +83,7 @@ const PolygonNode: React.FC<PolygonNodeProps> = ({ data, selected }) => {
             stroke="none"
           />
         )}
-        
+
         {/* Líneas del polígono */}
         <path
           d={pathData}

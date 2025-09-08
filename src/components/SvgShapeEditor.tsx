@@ -88,7 +88,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as { shapes?: Shape[]; canvasWidth?: number; canvasHeight?: number; displayScale?: number };
-        if (Array.isArray(parsed.shapes)) setShapes(parsed.shapes as Shape[]);
+        if (Array.isArray(parsed.shapes)) setShapes(parsed.shapes);
         if (typeof parsed.canvasWidth === 'number') setCanvasWidth(parsed.canvasWidth);
         if (typeof parsed.canvasHeight === 'number') setCanvasHeight(parsed.canvasHeight);
         // only initialize internal state when parent is not controlling displayScale
@@ -282,13 +282,13 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
             s.id = newid;
             // offset position a bit so pasted item is visible
             if (s.type === 'rect') { s.x = (s.x || 0) + 10; s.y = (s.y || 0) + 10; }
-            if (s.type === 'circle' || s.type === 'semicircle') { (s as CircleShape | SemiCircleShape).x = ((s as CircleShape | SemiCircleShape).x || 0) + 10; (s as CircleShape | SemiCircleShape).y = ((s as CircleShape | SemiCircleShape).y || 0) + 10; }
-            if (s.type === 'line') { (s as LineShape).x1 = ((s as LineShape).x1 || 0) + 10; (s as LineShape).y1 = ((s as LineShape).y1 || 0) + 10; (s as LineShape).x2 = ((s as LineShape).x2 || 0) + 10; (s as LineShape).y2 = ((s as LineShape).y2 || 0) + 10; }
+            if (s.type === 'circle' || s.type === 'semicircle') { (s).x = ((s).x || 0) + 10; (s).y = ((s).y || 0) + 10; }
+            if (s.type === 'line') { (s).x1 = ((s).x1 || 0) + 10; (s).y1 = ((s).y1 || 0) + 10; (s).x2 = ((s).x2 || 0) + 10; (s).y2 = ((s).y2 || 0) + 10; }
             // remap handles ids
             if (Array.isArray(s.handles)) {
               s.handles = s.handles.map((h: Handle) => ({ ...h, id: `h_${Date.now()}_${Math.floor(Math.random() * 10000)}` }));
             }
-            return s as Shape;
+            return s;
           });
           // select the last pasted shape
           const last = newOnes[newOnes.length - 1];
@@ -318,7 +318,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
             return { ...s, x: s.x + dx, y: s.y + dy, handles: s.handles.map(h => ({ ...h, x: h.x + dx, y: h.y + dy })) };
           }
           if (s.type === 'circle' || s.type === 'semicircle') {
-            const cs = s as CircleShape | SemiCircleShape;
+            const cs = s;
             return { ...s, x: cs.x + dx, y: cs.y + dy, handles: s.handles.map(h => ({ ...h, x: h.x + dx, y: h.y + dy })) } as typeof s;
           }
           if (s.type === 'line') {
@@ -341,7 +341,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
       const hid = `h_${Date.now()}`;
       let hx = 0, hy = 0;
       if (s.type === 'rect') { hx = snap(s.x + s.w / 2); hy = snap(s.y + s.h / 2); }
-      else if (s.type === 'circle' || s.type === 'semicircle') { hx = snap((s as CircleShape | SemiCircleShape).x); hy = snap((s as CircleShape | SemiCircleShape).y); }
+      else if (s.type === 'circle' || s.type === 'semicircle') { hx = snap((s).x); hy = snap((s).y); }
       else if (s.type === 'line') { hx = snap((s.x1 + s.x2) / 2); hy = snap((s.y1 + s.y2) / 2); }
       return { ...s, handles: [...(s.handles || []), { id: hid, x: hx, y: hy, type: 'source' }] };
     }));
@@ -371,7 +371,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
     setSelected(shape.id);
     // offset for move
     if (shape.type === 'rect') updateDragState({ mode: 'move', shapeId: shape.id, offsetX: svgP.x - shape.x, offsetY: svgP.y - shape.y });
-    else if (shape.type === 'circle' || shape.type === 'semicircle') updateDragState({ mode: 'move', shapeId: shape.id, offsetX: svgP.x - (shape as CircleShape | SemiCircleShape).x, offsetY: svgP.y - (shape as CircleShape | SemiCircleShape).y });
+    else if (shape.type === 'circle' || shape.type === 'semicircle') updateDragState({ mode: 'move', shapeId: shape.id, offsetX: svgP.x - (shape).x, offsetY: svgP.y - (shape).y });
     else if (shape.type === 'line') {
       // For lines, we need a reference point. Let's use x1, y1 as the anchor for the offset.
       updateDragState({ mode: 'move', shapeId: shape.id, offsetX: svgP.x - shape.x1, offsetY: svgP.y - shape.y1 });
@@ -477,7 +477,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
 
       // resize handling for line endpoints p1/p2
       if (currentDrag?.mode === 'resize' && s.type === 'line') {
-        const ls = s as LineShape;
+        const ls = s;
         if (currentDrag.corner === 'p1') {
           const nx1 = snap(svgP.x);
           const ny1 = snap(svgP.y);
@@ -505,7 +505,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
 
       // resize handling for line endpoints p1/p2
       if (currentDrag?.mode === 'resize' && s.type === 'line') {
-        const ls = s as LineShape;
+        const ls = s;
         if (currentDrag.corner === 'p1') {
           const nx1 = snap(svgP.x);
           const ny1 = snap(svgP.y);
@@ -709,7 +709,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
             if (idx === 1) return { ...h, x: ls.x2, y: ls.y2 };
             return h;
           });
-          (updated as LineShape | RectShape | CircleShape | SemiCircleShape | LineShape).handles = newHandles;
+          (updated as LineShape | RectShape | CircleShape | SemiCircleShape  ).handles = newHandles;
         }
       }
       return updated;
@@ -738,7 +738,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
     }
   };
 
-  const selectedShape = shapes.find(s => s.id === selected) as Shape | undefined;
+  const selectedShape = shapes.find(s => s.id === selected);
 
   return (
     <Box>
@@ -827,7 +827,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
             {shapes.map(s => (
               <g key={s.id}>
                 {s.type === 'rect' && (() => {
-                  const rs = s as RectShape;
+                  const rs = s;
                   const cx = rs.x + rs.w / 2;
                   const cy = rs.y + rs.h / 2;
                   return (
@@ -856,7 +856,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
                 })()}
 
                 {s.type === 'circle' && (() => {
-                  const cs = s as CircleShape;
+                  const cs = s;
                   const cx = cs.x;
                   const cy = cs.y;
                   return (
@@ -882,7 +882,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
                 })()}
 
                 {s.type === 'semicircle' && (() => {
-                  const ss = s as SemiCircleShape;
+                  const ss = s;
                   const cx = ss.x;
                   const cy = ss.y;
                   // semicircle drawn as an open arc from left to right (no closing line)
@@ -901,7 +901,7 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
                 })()}
 
                 {s.type === 'line' && (() => {
-                  const ls = s as LineShape;
+                  const ls = s;
                   const cx = (ls.x1 + ls.x2) / 2;
                   const cy = (ls.y1 + ls.y2) / 2;
                   return (
@@ -960,14 +960,14 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
                 <TextField type="color" label="Color de relleno" size="small" sx={{ width: 140 }} value={selectedShape.fillColor || '#000000'} onChange={(e) => updateSelectedProp({ fillColor: e.target.value })} />
                 <Box>
                   <Typography variant="caption">Opacidad de relleno</Typography>
-                  <Slider min={0} max={1} step={0.01} value={typeof selectedShape.fillOpacity === 'number' ? selectedShape.fillOpacity : 1} onChange={(_, v) => updateSelectedProp({ fillOpacity: Array.isArray(v) ? v[0] : v as number })} />
+                  <Slider min={0} max={1} step={0.01} value={typeof selectedShape.fillOpacity === 'number' ? selectedShape.fillOpacity : 1} onChange={(_, v) => updateSelectedProp({ fillOpacity: Array.isArray(v) ? v[0] : v })} />
                 </Box>
                 <Box>
                   <TextField type="color" label="Color de trazo" size="small" sx={{ width: 140 }} value={selectedShape.strokeColor || '#000000'} onChange={(e) => updateSelectedProp({ strokeColor: e.target.value })} />
                 </Box>
                 <Box>
                   <Typography variant="caption">Ancho de trazo</Typography>
-                  <Slider min={0} max={10} value={selectedShape.strokeWidth ?? 1} onChange={(_, v) => updateSelectedProp({ strokeWidth: Array.isArray(v) ? v[0] : v as number })} />
+                  <Slider min={0} max={10} value={selectedShape.strokeWidth ?? 1} onChange={(_, v) => updateSelectedProp({ strokeWidth: Array.isArray(v) ? v[0] : v })} />
                 </Box>
                 <Box>
                   <TextField type="number" label="Rotación (°)" value={selectedShape.rotation ?? 0} onChange={(e) => updateSelectedProp({ rotation: Number(e.target.value) || 0 })} />
@@ -1024,10 +1024,10 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
                 {selectedShape.type === 'rect' && (
                   <>
                     <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
-                      <TextField fullWidth label="X" type="number" size="small" value={(selectedShape as RectShape).x} onChange={(e) => updateSelectedProp({ x: Number(e.target.value) })} />
-                      <TextField fullWidth label="Y" type="number" size="small" value={(selectedShape as RectShape).y} onChange={(e) => updateSelectedProp({ y: Number(e.target.value) })} />
-                      <TextField fullWidth label="W" type="number" size="small" value={(selectedShape as RectShape).w} onChange={(e) => updateSelectedProp({ w: Number(e.target.value) })} />
-                      <TextField fullWidth label="H" type="number" size="small" value={(selectedShape as RectShape).h} onChange={(e) => updateSelectedProp({ h: Number(e.target.value) })} />
+                      <TextField fullWidth label="X" type="number" size="small" value={(selectedShape).x} onChange={(e) => updateSelectedProp({ x: Number(e.target.value) })} />
+                      <TextField fullWidth label="Y" type="number" size="small" value={(selectedShape).y} onChange={(e) => updateSelectedProp({ y: Number(e.target.value) })} />
+                      <TextField fullWidth label="W" type="number" size="small" value={(selectedShape).w} onChange={(e) => updateSelectedProp({ w: Number(e.target.value) })} />
+                      <TextField fullWidth label="H" type="number" size="small" value={(selectedShape).h} onChange={(e) => updateSelectedProp({ h: Number(e.target.value) })} />
                     </Box>
                   </>
                 )}
@@ -1035,9 +1035,9 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
                 {selectedShape.type === 'circle' && (
                   <>
                     <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
-                      <TextField fullWidth label="CX" type="number" size="small" value={(selectedShape as CircleShape).x} onChange={(e) => updateSelectedProp({ x: Number(e.target.value) })} />
-                      <TextField fullWidth label="CY" type="number" size="small" value={(selectedShape as CircleShape).y} onChange={(e) => updateSelectedProp({ y: Number(e.target.value) })} />
-                      <TextField fullWidth sx={{ gridColumn: '1 / -1' }} label="R" type="number" size="small" value={(selectedShape as CircleShape).r} onChange={(e) => updateSelectedProp({ r: Number(e.target.value) })} />
+                      <TextField fullWidth label="CX" type="number" size="small" value={(selectedShape).x} onChange={(e) => updateSelectedProp({ x: Number(e.target.value) })} />
+                      <TextField fullWidth label="CY" type="number" size="small" value={(selectedShape).y} onChange={(e) => updateSelectedProp({ y: Number(e.target.value) })} />
+                      <TextField fullWidth sx={{ gridColumn: '1 / -1' }} label="R" type="number" size="small" value={(selectedShape).r} onChange={(e) => updateSelectedProp({ r: Number(e.target.value) })} />
                     </Box>
                   </>
                 )}
@@ -1045,9 +1045,9 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
                 {selectedShape.type === 'semicircle' && (
                   <>
                     <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
-                      <TextField fullWidth label="CX" type="number" size="small" value={(selectedShape as SemiCircleShape).x} onChange={(e) => updateSelectedProp({ x: Number(e.target.value) })} />
-                      <TextField fullWidth label="CY" type="number" size="small" value={(selectedShape as SemiCircleShape).y} onChange={(e) => updateSelectedProp({ y: Number(e.target.value) })} />
-                      <TextField fullWidth sx={{ gridColumn: '1 / -1' }} label="R" type="number" size="small" value={(selectedShape as SemiCircleShape).r} onChange={(e) => updateSelectedProp({ r: Number(e.target.value) })} />
+                      <TextField fullWidth label="CX" type="number" size="small" value={(selectedShape).x} onChange={(e) => updateSelectedProp({ x: Number(e.target.value) })} />
+                      <TextField fullWidth label="CY" type="number" size="small" value={(selectedShape).y} onChange={(e) => updateSelectedProp({ y: Number(e.target.value) })} />
+                      <TextField fullWidth sx={{ gridColumn: '1 / -1' }} label="R" type="number" size="small" value={(selectedShape).r} onChange={(e) => updateSelectedProp({ r: Number(e.target.value) })} />
                     </Box>
                   </>
                 )}
@@ -1055,10 +1055,10 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
                 {selectedShape.type === 'line' && (
                   <>
                     <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
-                      <TextField fullWidth label="X1" type="number" size="small" value={(selectedShape as LineShape).x1} onChange={(e) => updateSelectedProp({ x1: Number(e.target.value) })} />
-                      <TextField fullWidth label="Y1" type="number" size="small" value={(selectedShape as LineShape).y1} onChange={(e) => updateSelectedProp({ y1: Number(e.target.value) })} />
-                      <TextField fullWidth label="X2" type="number" size="small" value={(selectedShape as LineShape).x2} onChange={(e) => updateSelectedProp({ x2: Number(e.target.value) })} />
-                      <TextField fullWidth label="Y2" type="number" size="small" value={(selectedShape as LineShape).y2} onChange={(e) => updateSelectedProp({ y2: Number(e.target.value) })} />
+                      <TextField fullWidth label="X1" type="number" size="small" value={(selectedShape).x1} onChange={(e) => updateSelectedProp({ x1: Number(e.target.value) })} />
+                      <TextField fullWidth label="Y1" type="number" size="small" value={(selectedShape).y1} onChange={(e) => updateSelectedProp({ y1: Number(e.target.value) })} />
+                      <TextField fullWidth label="X2" type="number" size="small" value={(selectedShape).x2} onChange={(e) => updateSelectedProp({ x2: Number(e.target.value) })} />
+                      <TextField fullWidth label="Y2" type="number" size="small" value={(selectedShape).y2} onChange={(e) => updateSelectedProp({ y2: Number(e.target.value) })} />
                     </Box>
                   </>
                 )}

@@ -41,6 +41,8 @@ const SvgEditorDialog: React.FC<Props> = ({
 }) => {
   const [editorReloadKey, setEditorReloadKey] = React.useState<number>(Date.now());
   const [dialogDisplayScale, setDialogDisplayScale] = React.useState<number | undefined>(undefined);
+  const [categoryFilter, setCategoryFilter] = React.useState<string>('all');
+  const [searchQuery, setSearchQuery] = React.useState<string>('');
 
   const STORAGE_KEY = 'svgShapeEditor.draft.v1';
 
@@ -93,8 +95,8 @@ const SvgEditorDialog: React.FC<Props> = ({
         handles = (handlesRaw as unknown[]).map((h, idx) => {
           const ho = h as Record<string, unknown> | undefined;
           const id = (ho && typeof ho.id === 'string') ? ho.id : `h_${idx}`;
-          const x = (ho && typeof ho.x === 'number') ? ho.x : (ho && ho.x ? Number(String(ho.x)) : 0);
-          const y = (ho && typeof ho.y === 'number') ? ho.y : (ho && ho.y ? Number(String(ho.y)) : 0);
+          const x = (ho && (typeof ho.x === 'number' || typeof ho.x === 'string')) ? Number((ho.x as unknown)) : 0;
+          const y = (ho && (typeof ho.y === 'number' || typeof ho.y === 'string')) ? Number((ho.y as unknown)) : 0;
           const type = (ho && typeof ho.type === 'string') ? ho.type : 'source';
           return { id, x, y, type };
         });
@@ -319,8 +321,8 @@ const SvgEditorDialog: React.FC<Props> = ({
       const wAttr = svgEl.getAttribute('width');
       const hAttr = svgEl.getAttribute('height');
       if (!vb && wAttr && hAttr) {
-        const pw = parseFloat(wAttr as string);
-        const ph = parseFloat(hAttr as string);
+        const pw = parseFloat(wAttr);
+        const ph = parseFloat(hAttr);
         if (!isNaN(pw) && !isNaN(ph) && pw > 0 && ph > 0) {
           svgEl.setAttribute('viewBox', `0 0 ${pw} ${ph}`);
         }
@@ -477,23 +479,83 @@ const SvgEditorDialog: React.FC<Props> = ({
         <Box style={{ marginTop: 12 }}>
           <Typography variant="subtitle2">Elementos guardados</Typography>
           <Box style={{ marginTop: 8 }}>
-            {svgElements.length === 0 ? (
-              <Typography variant="body2" style={{ color: '#666' }}>No hay elementos guardados</Typography>
-            ) : svgElements.map((el) => (
-              <Box key={el.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: 6, borderBottom: '1px solid #eee' }}>
-                <div style={{ width: 112, height: 112, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #f0f0f0', padding: 8, boxSizing: 'border-box', background: '#fff' }}>
-                  <div dangerouslySetInnerHTML={{ __html: normalizeSvgForPreview(el.svg || '', 96, 96) }} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Typography variant="body2" style={{ fontWeight: 600 }}>{el.name}</Typography>
-                  <Typography variant="caption" style={{ color: '#666' }}>{el.description}</Typography>
-                </div>
-                <Box style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <Button size="small" onClick={() => copyElementToEditor(el)}>Copiar al editor</Button>
-                  <Button size="small" color="error" onClick={() => onDeleteElement(el)}>Eliminar</Button>
+            {/* Filters: category + search */}
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1, flexWrap: 'wrap' }}>
+              <FormControl size="small" sx={{ minWidth: 160 }}>
+                <InputLabel>Filtrar categoría</InputLabel>
+                <Select
+                  value={categoryFilter}
+                  label="Filtrar categoría"
+                  onChange={(e) => setCategoryFilter(String(e.target.value))}
+                >
+                  <MenuItem value="all">Todas</MenuItem>
+                  {categories.map((cat) => (
+                    <MenuItem key={cat} value={cat}>{cat}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <TextField
+                size="small"
+                placeholder="Buscar por nombre o descripción"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                sx={{ minWidth: 240, flex: 1 }}
+              />
+            </Box>
+
+            {(() => {
+              const q = (searchQuery || '').trim().toLowerCase();
+              const filtered = svgElements.filter((el) => {
+                if (categoryFilter !== 'all') {
+                  const cat = (el.category as string) || 'custom';
+                  if (cat !== categoryFilter) return false;
+                }
+                if (!q) return true;
+                const name = (el.name || '').toLowerCase();
+                const desc = (el.description || '').toLowerCase();
+                return name.includes(q) || desc.includes(q);
+              });
+
+              if (filtered.length === 0) {
+                return <Typography variant="body2" style={{ color: '#666' }}>No hay elementos que coincidan</Typography>;
+              }
+
+              return (
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+                  {filtered.map((el) => (
+                    <Box
+                      key={el.id}
+                      sx={{
+                        width: '100%',
+                        border: '1px solid #eee',
+                        borderRadius: 2,
+                        background: '#fff',
+                        overflow: 'hidden',
+                        transition: 'transform 150ms ease, box-shadow 150ms ease',
+                        '&:hover': {
+                          transform: 'translateY(-6px)',
+                          boxShadow: 3,
+                        }
+                      }}
+                    >
+                    <div style={{ width: '100%', height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid #f0f0f0', padding: 8, boxSizing: 'border-box', background: '#fff' }}>
+                      <div dangerouslySetInnerHTML={{ __html: normalizeSvgForPreview(el.svg || '', 96, 96) }} />
+                    </div>
+                      <Box sx={{ p: 1 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>{el.name}</Typography>
+                        <Typography variant="caption" sx={{ color: '#666', display: 'block' }}>{el.description}</Typography>
+                        <Typography variant="caption" sx={{ color: '#444', display: 'block', mt: 0.75 }}>Creado por: {el.created_by || 'desconocido'}</Typography>
+                        <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
+                          <Button size="small" onClick={() => copyElementToEditor(el)}>Copiar al editor</Button>
+                          <Button size="small" color="error" onClick={() => onDeleteElement(el)}>Eliminar</Button>
+                        </Box>
+                      </Box>
+                    </Box>
+                  ))}
                 </Box>
-              </Box>
-            ))}
+              );
+            })()}
           </Box>
         </Box>
       </DialogContent>
@@ -501,18 +563,20 @@ const SvgEditorDialog: React.FC<Props> = ({
         <Button onClick={handleClearAll} color="error" startIcon={<span className="material-symbols-rounded">delete</span>}>Limpiar</Button>
         <Button onClick={onClose} color="warning" startIcon={<span className="material-symbols-rounded">close</span>}>Cancelar</Button>
         <Button
-          onClick={async () => {
-            try {
-              // call parent's save handler (may be sync or async)
-              await Promise.resolve(onSaveSvgElement());
-              // If save succeeded, clear the editor inputs and draft
-              try { handleClearAll(); } catch { /* ignore */ }
-            } catch (e) {
-              console.error('Error saving SVG element', e);
-            } finally {
-              // notify others that svg elements changed so palettes can refresh
-              try { window.dispatchEvent(new CustomEvent('svg-elements-updated')); } catch { /* ignore */ }
-            }
+          onClick={() => {
+            void (async () => {
+              try {
+                // call parent's save handler (may be sync or async)
+                await Promise.resolve(onSaveSvgElement());
+                // If save succeeded, clear the editor inputs and draft
+                try { handleClearAll(); } catch { /* ignore */ }
+              } catch (e) {
+                console.error('Error saving SVG element', e);
+              } finally {
+                // notify others that svg elements changed so palettes can refresh
+                try { window.dispatchEvent(new CustomEvent('svg-elements-updated')); } catch { /* ignore */ }
+              }
+            })();
           }}
           startIcon={<span className="material-symbols-rounded">save</span>}
           variant="contained"

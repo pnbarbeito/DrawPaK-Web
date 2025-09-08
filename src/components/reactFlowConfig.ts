@@ -15,7 +15,7 @@ export const defaultEdgeOptions = {
   type: 'smoothstep',
   style: {
     strokeWidth: 2,
-    stroke: '#000000' // Color negro por defecto
+    stroke: '#000000', // Color negro por defecto
   }
 };
 

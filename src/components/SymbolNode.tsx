@@ -152,7 +152,7 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
   // Normalize inline SVG so it fits the container: ensure viewBox exists (if possible), remove fixed width/height, and force CSS width/height 100%
   useEffect(() => {
     if (!inlineWrapperRef.current) return;
-    const svgEl = inlineWrapperRef.current.querySelector('svg') as SVGSVGElement | null;
+    const svgEl = inlineWrapperRef.current.querySelector('svg');
     if (!svgEl) return;
     const backgroundColor = (data as unknown as { backgroundColor?: string }).backgroundColor;
     const primaryColor = (data as unknown as { primaryColor?: string }).primaryColor;
@@ -177,8 +177,8 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
       // Apply color customizations if provided
       if (primaryColor) {
         try {
-          svgEl.querySelectorAll('[stroke]').forEach((n) => { (n as Element).setAttribute('stroke', primaryColor); });
-          svgEl.querySelectorAll('[fill]').forEach((n) => { (n as Element).setAttribute('fill', (n as Element).getAttribute('fill') === 'none' ? 'none' : primaryColor); });
+          svgEl.querySelectorAll('[stroke]').forEach((n) => { (n).setAttribute('stroke', primaryColor); });
+          svgEl.querySelectorAll('[fill]').forEach((n) => { (n).setAttribute('fill', (n).getAttribute('fill') === 'none' ? 'none' : primaryColor); });
         } catch { /* ignore */ }
       }
 
@@ -231,7 +231,7 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
       };
 
       parsedHandles.forEach((raw) => {
-        const handle = raw as unknown as SerializedHandle;
+        const handle = raw as SerializedHandle;
         const x = Number(handle.x ?? 0) || 0;
         const y = Number(handle.y ?? 0) || 0;
         // clamp inside viewBox bounds
@@ -548,7 +548,7 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
           transform: `rotate(${rotation}deg) scale(${scale}) scaleX(${flipX ? -1 : 1}) scaleY(${flipY ? -1 : 1})`,
           transformOrigin: 'center center',
           // Add dotted border when selected (now it rotates with the symbol)
-          border: selected ? '2px dashed #0078d4' : 'none',
+          border: selected ? '1px dashed rgba(33,150,243,0.8)' : 'none',
           borderRadius: selected ? '4px' : '0',
           boxSizing: 'border-box',
         }}

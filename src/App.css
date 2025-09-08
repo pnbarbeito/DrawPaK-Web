@@ -1,4 +1,14 @@
-@import 'material-symbols';
+/* Import only the Rounded Material Symbols from the installed package (subset) */
+@import '../node_modules/material-symbols/rounded.css';
+
+/* Ensure the font uses font-display:swap to avoid render-blocking; override if package uses block */
+@font-face {
+  font-family: "Material Symbols Rounded";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url('../node_modules/material-symbols/material-symbols-rounded.woff2') format('woff2');
+}
 #root {
   height: 100%;
   width: 100%;

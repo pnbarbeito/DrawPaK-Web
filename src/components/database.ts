@@ -9,6 +9,7 @@ export interface Schema {
   nodes: string; // JSON string de los nodos
   edges: string; // JSON string de las conexiones
   created_at?: string;
+  created_by?: string;
   updated_at?: string;
 }
 
@@ -20,6 +21,7 @@ export interface SvgElement {
   svg: string; // SVG markup
   handles?: string; // JSON string of handles metadata
   created_at?: string;
+  created_by?: string;
   updated_at?: string;
 }
 
@@ -120,6 +122,7 @@ export async function saveSchema(schema: Schema): Promise<number> {
   const toSave: Schema = {
     ...schema,
     created_at: schema.created_at || now,
+    created_by: schema.created_by || undefined,
     updated_at: now
   };
 
@@ -166,6 +169,7 @@ export async function duplicateSchema(id: number, newName: string): Promise<numb
     nodes: original.nodes,
     edges: original.edges,
     created_at: nowIso(),
+    created_by: original.created_by || undefined,
     updated_at: nowIso()
   };
   return await saveSchema(copy);
@@ -178,6 +182,7 @@ export async function saveSvgElement(elem: SvgElement): Promise<number> {
   const toSave: SvgElement = {
     ...elem,
     created_at: elem.created_at || now,
+    created_by: elem.created_by || undefined,
     updated_at: now
   };
 
@@ -842,6 +847,7 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
             svg: element.svg,
             handles: element.handles || '',
             created_at: nowIso(),
+            created_by: 'pbarbeito',
             updated_at: nowIso()
           };
           await db.svg_elements.add(elem);

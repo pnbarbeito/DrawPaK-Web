@@ -15,11 +15,10 @@ import { nodeTypes, defaultEdgeOptions, snapGrid } from './reactFlowConfig.ts';
 import { initDatabase, saveSchema, getAllSchemas, deleteSchema, duplicateSchema, updateSchema, saveSvgElement, getAllSvgElements, deleteSvgElement, getSvgCategories } from './database.ts';
 import type { Schema, SvgElement } from './database.ts';
 import SvgEditorDialog from './SvgEditorDialog';
-import { toPng } from 'html-to-image';
-import jsPDF from 'jspdf';
+// dynamic imports for large libraries (jsPDF, html-to-image) are loaded only when exporting
 import type { PolygonPoint } from './PolygonNode';
 // No Tauri runtime in web build — all file save actions use browser fallbacks.
-import { Box, AppBar, Toolbar, IconButton, Typography, Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, List, ListItem, ListItemText, Checkbox, FormControlLabel } from '@mui/material';
+import { Box, AppBar, Toolbar, IconButton, Typography, Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, List, ListItem, ListItemText } from '@mui/material';
 import Popover from '@mui/material/Popover';
 import { RgbaColorPicker } from 'react-colorful';
 
@@ -117,6 +116,7 @@ function FlowApp(): React.ReactElement {
   strokeWidth?: number;
   strokeColor?: string;
   fillColor?: string;
+  fillOpacity?: number;
   };
   type ElectEdgeData = Record<string, unknown>;
   // Use React Flow's Edge type for correctness (id is required)
@@ -126,6 +126,20 @@ function FlowApp(): React.ReactElement {
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<ElectNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<ElectEdgeData>([]);
+
+  // Ensure label nodes are always rendered on top by placing them at the end
+  React.useEffect(() => {
+    if (nodes.length === 0) return;
+    const labels = nodes.filter(n => n.type === 'labelNode');
+    if (labels.length === 0) return;
+    const others = nodes.filter(n => n.type !== 'labelNode');
+    const reordered = [...others, ...labels];
+    const same = reordered.length === nodes.length && reordered.every((n, i) => n.id === nodes[i].id);
+    if (!same) {
+      // Update nodes to keep labels on top
+      setNodes(reordered);
+    }
+  }, [nodes, setNodes]);
 
   // Color picker popover anchors
   const [bgPickerAnchor, setBgPickerAnchor] = React.useState<HTMLElement | null>(null);
@@ -194,28 +208,37 @@ function FlowApp(): React.ReactElement {
     return { r: 0, g: 0, b: 0 };
   }
 
-  function parseColorToRgba(obj: string | undefined) {
+  function parseColorToRgba(obj: string | undefined, overrideAlpha?: number) {
     const fallback = { r: 255, g: 255, b: 255, a: 1 };
-    if (!obj) return fallback;
+    if (!obj) return { ...fallback, a: typeof overrideAlpha === 'number' ? overrideAlpha : fallback.a };
     const s = obj.trim();
+    let base = { ...fallback };
     if (s.startsWith('rgba')) {
       // rgba( r, g, b, a )
       const nums = s.replace(/rgba\(|\)/g, '').split(',').map(p => p.trim());
-      if (nums.length >= 4) {
-        return { r: Number(nums[0]) || 0, g: Number(nums[1]) || 0, b: Number(nums[2]) || 0, a: Number(nums[3]) || 1 };
-      }
-      return fallback;
-    }
-    if (s.startsWith('rgb(')) {
+        if (nums.length >= 4) {
+          const r = Number(nums[0]) || 0;
+          const g = Number(nums[1]) || 0;
+          const b = Number(nums[2]) || 0;
+          const aRaw = Number(nums[3]);
+          const a = Number.isFinite(aRaw) ? aRaw : 1;
+          base = { r, g, b, a };
+        } else {
+          return { ...fallback, a: typeof overrideAlpha === 'number' ? overrideAlpha : fallback.a };
+        }
+    } else if (s.startsWith('rgb(')) {
       const nums = s.replace(/rgb\(|\)/g, '').split(',').map(p => p.trim());
       if (nums.length >= 3) {
-        return { r: Number(nums[0]) || 0, g: Number(nums[1]) || 0, b: Number(nums[2]) || 0, a: 1 };
+        base = { r: Number(nums[0]) || 0, g: Number(nums[1]) || 0, b: Number(nums[2]) || 0, a: 1 };
+      } else {
+        return { ...fallback, a: typeof overrideAlpha === 'number' ? overrideAlpha : fallback.a };
       }
-      return fallback;
+    } else {
+      // assume hex
+      const { r, g, b } = hexToRgb(s);
+      base = { r, g, b, a: 1 };
     }
-    // assume hex
-    const { r, g, b } = hexToRgb(s);
-    return { r, g, b, a: 1 };
+    return { ...base, a: typeof overrideAlpha === 'number' ? overrideAlpha : base.a };
   }
 
   function rgbaToString(c: { r: number; g: number; b: number; a?: number }) {
@@ -283,9 +306,48 @@ function FlowApp(): React.ReactElement {
   const stableNodeTypes = React.useMemo(() => nodeTypes, []);
   const stableDefaultEdgeOptions = React.useMemo(() => defaultEdgeOptions, []);
 
+  // Effect: when an edge is selected and connects two symbolNode nodes,
+  // color it gray; restore original color when unselected or endpoints change.
+  React.useEffect(() => {
+    if (!nodes || !edges) return;
+
+    const nodeTypeById = new Map<string, string>();
+    for (const n of nodes) nodeTypeById.set(n.id, n.type || '');
+
+    let changed = false;
+    const updated = edges.map((e) => {
+      const srcType = nodeTypeById.get(e.source) || '';
+      const tgtType = nodeTypeById.get(e.target) || '';
+      const shouldBeGray = Boolean(e.selected && srcType === 'symbolNode' && tgtType === 'symbolNode');
+
+      const styleObj = (e.style as Record<string, unknown> | undefined) || undefined;
+      const defaultStroke = (stableDefaultEdgeOptions.style as Record<string, unknown> | undefined)?.stroke as string | undefined;
+      const currentStroke = (styleObj && (styleObj.stroke as string | undefined)) || defaultStroke || '#000000';
+
+      if (shouldBeGray) {
+        if (currentStroke !== '#9e9e9e') {
+          changed = true;
+          return { ...e, style: { ...(e.style || {}), stroke: '#9e9e9e' } };
+        }
+        return e;
+      }
+
+      // If it shouldn't be gray but currently is, restore to default
+      if (styleObj && (styleObj.stroke as string | undefined) === '#9e9e9e') {
+        changed = true;
+        return { ...e, style: { ...(e.style || {}), stroke: defaultStroke || '#000000' } };
+      }
+      return e;
+    });
+
+    if (changed) {
+      setEdges(updated);
+    }
+  }, [edges, nodes, setEdges, stableDefaultEdgeOptions]);
+
   React.useEffect(() => {
     let mounted = true;
-    (async () => {
+  void (async () => {
       if (!svgMarkup) {
         if (mounted) setSanitizedSvg('');
         return;
@@ -302,11 +364,12 @@ function FlowApp(): React.ReactElement {
         console.warn('dompurify not available, using raw svg markup for preview', e);
         if (mounted) setSanitizedSvg(svgMarkup);
       }
-    })();
+  })();
     return () => { mounted = false; };
   }, [svgMarkup]);
   const [showSaveDialog, setShowSaveDialog] = React.useState(false);
   const [schemas, setSchemas] = React.useState<Schema[]>([]);
+  const [schemaSearch, setSchemaSearch] = React.useState('');
   const [schemaName, setSchemaName] = React.useState('');
   const [schemaDescription, setSchemaDescription] = React.useState('');
   const [isTemplate, setIsTemplate] = React.useState(false);
@@ -317,7 +380,7 @@ function FlowApp(): React.ReactElement {
 
   // Inicializar la base de datos al cargar la aplicación
   React.useEffect(() => {
-    initDatabase().catch(error => {
+    void initDatabase().catch(error => {
       console.error('Error inicializando la base de datos:', error);
     });
   }, []);
@@ -365,14 +428,18 @@ function FlowApp(): React.ReactElement {
       // Si hay un esquema actual en edición, actualizarlo directamente
       if (currentSchemaId) {
         await updateSchema(currentSchemaId, {
+          name: schemaName,
+          description: schemaDescription,
           nodes: JSON.stringify(nodes),
           edges: JSON.stringify(edges),
         });
 
-        // Actualizar localStorage
-        saveToLocalStorage(nodes, edges, currentSchemaId, currentSchemaName);
+        // Actualizar localStorage y estado local
+        setCurrentSchemaName(schemaName);
+        saveToLocalStorage(nodes, edges, currentSchemaId, schemaName);
 
         await loadSchemas();
+        setShowSaveDialog(false);
         return;
       }
 
@@ -382,11 +449,13 @@ function FlowApp(): React.ReactElement {
         return;
       }
 
+      const creator = username || localStorage.getItem('dp_username') || 'unknown';
       const newSchemaId = await saveSchema({
         name: schemaName,
         description: schemaDescription,
         nodes: JSON.stringify(nodes),
         edges: JSON.stringify(edges),
+        created_by: creator
       });
 
       // Establecer el nuevo esquema como actual
@@ -476,7 +545,8 @@ function FlowApp(): React.ReactElement {
         handles: svgHandles || ''
       };
 
-      await saveSvgElement(elem);
+      const creator = username || localStorage.getItem('dp_username') || 'unknown';
+      await saveSvgElement({ ...elem, created_by: creator });
       setShowSvgDialog(false);
       setSvgName('');
       setSvgDescription('');
@@ -499,7 +569,7 @@ function FlowApp(): React.ReactElement {
     if (currentSchemaId) {
       console.log('Opening save dialog for existing schema');
       setSchemaName(currentSchemaName || '');
-      setSchemaDescription(''); // Podrías agregar currentSchemaDescription si existe
+  // keep existing schemaDescription (do not clear it here)
     } else {
       console.log('Opening save dialog for new schema');
       setSchemaName('');
@@ -516,8 +586,8 @@ function FlowApp(): React.ReactElement {
       const parsedEdgesRaw = JSON.parse(schema.edges) as unknown;
 
       // Validate parsed structures are arrays and contain expected shapes
-      const parsedNodes = Array.isArray(parsedNodesRaw) ? (parsedNodesRaw as Array<unknown>).filter(isNodeObject) as Node<ElectNodeData>[] : [];
-      const parsedEdges = Array.isArray(parsedEdgesRaw) ? (parsedEdgesRaw as Array<unknown>).filter(isEdgeObject) as Edge<ElectEdgeData>[] : [];
+      const parsedNodes = Array.isArray(parsedNodesRaw) ? (parsedNodesRaw as Array<unknown>).filter(isNodeObject) : [];
+      const parsedEdges = Array.isArray(parsedEdgesRaw) ? (parsedEdgesRaw as Array<unknown>).filter(isEdgeObject) : [];
 
       setNodes(parsedNodes);
       setEdges(parsedEdges);
@@ -526,6 +596,8 @@ function FlowApp(): React.ReactElement {
       // Establecer el ID del esquema actual para futuras actualizaciones
       setCurrentSchemaId(schema.id || null);
       setCurrentSchemaName(schema.name || '');
+  // populate editable description so the save dialog shows stored description
+  setSchemaDescription(schema.description || '');
 
       // Guardar en localStorage con el ID del esquema
       saveToLocalStorage(parsedNodes, parsedEdges, schema.id || null, schema.name);
@@ -1137,7 +1209,7 @@ function FlowApp(): React.ReactElement {
   }, [isDrawingPolygon]);
 
   const finishPolygon = useCallback(() => {
-    if (currentPolygonPoints.length >= 3) {
+  if (currentPolygonPoints.length >= 2) {
       // Crear nuevo nodo polígono
       const polygonId = `polygon_${Date.now()}`;
       
@@ -1145,13 +1217,14 @@ function FlowApp(): React.ReactElement {
       const minX = Math.min(...currentPolygonPoints.map(p => p.x));
       const minY = Math.min(...currentPolygonPoints.map(p => p.y));
 
-      // PolygonNode añade un padding interno de 10px al renderizado y reubica
-      // los puntos relativos usando `x - minX + 10`. Para que la forma final
-      // se alinee con la grid usada al dibujar, colocamos el nodo en
-      // (minX - 10, minY - 10) para compensar dicho padding.
-      const INNER_PADDING = 10;
-      const nodePosX = minX - INNER_PADDING;
-      const nodePosY = minY - INNER_PADDING;
+  // Use the same padding as PolygonNode and snap/round the node position
+  // so the initial placement exactly matches the rendered SVG coordinates.
+  const PADDING = 10;
+  const rawPos = { x: minX - PADDING, y: minY - PADDING };
+  // Snap to grid and round to integer coordinates to avoid fractional offsets
+  const snappedPos = snapToGridPos({ x: Math.round(rawPos.x), y: Math.round(rawPos.y) }, GRID_SIZE);
+  const nodePosX = snappedPos.x;
+  const nodePosY = snappedPos.y;
 
       const newPolygonNode: Node = {
         id: polygonId,
@@ -1169,7 +1242,8 @@ function FlowApp(): React.ReactElement {
         deletable: true
       };
 
-      setNodes(nds => [...nds, newPolygonNode]);
+  // Insert polygon at the beginning so it renders behind other nodes
+  setNodes(nds => [newPolygonNode, ...nds]);
     }
 
     // Limpiar estado
@@ -1309,17 +1383,21 @@ function FlowApp(): React.ReactElement {
         id: getId(),
         position,
         type: 'symbolNode',
-        data: svgElement ? {
-          symbolKey,
-          label: svgElement.name,
-          svg: svgElement.svg,
-          handles: svgElement.handles,
-          isDynamicSvg: true
-        } : {
-          symbolKey,
-          label: symbolKey,
-          isDynamicSvg: false
-        },
+              data: svgElement ? {
+                symbolKey,
+                label: svgElement.name,
+                svg: svgElement.svg,
+                handles: svgElement.handles,
+                isDynamicSvg: true,
+                primaryColor: 'rgba(0,0,0,1)',
+                backgroundColor: 'rgba(255,255,255,0)'
+              } : {
+                symbolKey,
+                label: symbolKey,
+                isDynamicSvg: false,
+                primaryColor: 'rgba(0,0,0,1)',
+                backgroundColor: 'rgba(255,255,255,0)'
+              },
       };
 
       // creating new node
@@ -1415,7 +1493,8 @@ function FlowApp(): React.ReactElement {
       await new Promise(resolve => requestAnimationFrame(resolve));
       let fullDataUrl: string | null = null;
       try {
-        fullDataUrl = await toPng(reactFlowWrapper.current!, {
+        const { toPng: dynamicToPng } = await import('html-to-image');
+        fullDataUrl = await dynamicToPng(reactFlowWrapper.current, {
           cacheBust: true,
           backgroundColor: '#ffffff'
         });
@@ -1488,7 +1567,8 @@ function FlowApp(): React.ReactElement {
       await new Promise(resolve => requestAnimationFrame(resolve));
       let fullDataUrl: string | null = null;
       try {
-        fullDataUrl = await toPng(reactFlowWrapper.current!, {
+        const { toPng: dynamicToPng } = await import('html-to-image');
+        fullDataUrl = await dynamicToPng(reactFlowWrapper.current, {
           cacheBust: true,
           backgroundColor: '#ffffff'
         });
@@ -1529,8 +1609,8 @@ function FlowApp(): React.ReactElement {
 
       const croppedDataUrl = canvas.toDataURL('image/png');
 
-      // Prepare PDF A4
-      // We'll use jsPDF with 'mm' units and fit the image into the chosen orientation while keeping aspect ratio
+  // Prepare PDF A4
+  // We'll dynamically import heavy libs (html-to-image / jsPDF) only when needed so they can be code-split
       const orientation = exportPDFOrientation === 'landscape' ? 'landscape' : 'portrait';
       // A4 size in mm
       const A4_W_MM = 210;
@@ -1556,18 +1636,25 @@ function FlowApp(): React.ReactElement {
       const x = (pdfW - drawW) / 2;
       const y = (pdfH - drawH) / 2;
 
-      const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation });
-      pdf.addImage(croppedDataUrl, 'PNG', x, y, drawW, drawH);
-
-      const arrayBuffer = pdf.output('arraybuffer');
-      const bytes = new Uint8Array(arrayBuffer);
-      const blob = new Blob([bytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'diagram_a4.pdf';
-      a.click();
-      URL.revokeObjectURL(url);
+      try {
+        const [{ default: jsPDF }] = await Promise.all([
+          import('jspdf')
+        ]);
+        const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation });
+        pdf.addImage(croppedDataUrl, 'PNG', x, y, drawW, drawH);
+        const arrayBuffer = pdf.output('arraybuffer');
+        const bytes = new Uint8Array(arrayBuffer);
+        const blob = new Blob([bytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'diagram_a4.pdf';
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error('Failed to load jsPDF dynamically', err);
+        alert('No se pudo generar el PDF: librería faltante');
+      }
 
       cancelAreaSelection();
     } catch (error) {
@@ -1628,7 +1715,7 @@ function FlowApp(): React.ReactElement {
           <IconButton color="inherit" onClick={handleSaveButtonClick} title={currentSchemaId ? "Actualizar esquema" : "Guardar esquema"}>
             <span className="material-symbols-rounded">save</span>
           </IconButton>
-          <IconButton color="inherit" onClick={() => { loadSchemas(); setShowSchemasDialog(true); }} title="Cargar esquema">
+          <IconButton color="inherit" onClick={() => { void loadSchemas(); setShowSchemasDialog(true); }} title="Cargar esquema">
             <span className="material-symbols-rounded">folder_open</span>
           </IconButton>
           <Typography variant="h6" sx={{ flexGrow: 1, textAlign: 'center' }}>
@@ -1642,7 +1729,7 @@ function FlowApp(): React.ReactElement {
           <IconButton color="inherit" onClick={copySelectedElements} title="Copiar elementos seleccionados (Ctrl+C)">
             <span className="material-symbols-rounded">content_copy</span>
           </IconButton>
-          <IconButton color="inherit" onClick={() => { loadSvgElements(); loadSvgCategories(); setShowSvgDialog(true); }} title="Elementos SVG">
+          <IconButton color="inherit" onClick={() => { void loadSvgElements(); void loadSvgCategories(); setShowSvgDialog(true); }} title="Elementos SVG">
             <span className="material-symbols-rounded">edit</span>
           </IconButton>
           <IconButton color="inherit" onClick={() => {
@@ -1653,7 +1740,7 @@ function FlowApp(): React.ReactElement {
               id: getId(),
               position,
               type: 'labelNode',
-              data: { label: 'Nueva etiqueta', fontSize: 14, color: '#000000' }
+              data: { label: 'Nueva etiqueta', fontSize: 14, color: '#000000', backgroundColor: 'rgba(255,255,255,0)', borderColor: '#000000', borderWidth: 0 }
             } as Node<ElectNodeData>;
             setNodes((nds) => nds.concat(newLabelNode));
           }} title="Añadir etiqueta">
@@ -1686,13 +1773,13 @@ function FlowApp(): React.ReactElement {
             </>
           ) : (
             <>
-              <IconButton color="inherit" onClick={async () => {
+              <IconButton color="inherit" onClick={() => { void (async () => {
                 if (pendingExportType === 'pdf') {
                   await exportSelectedAreaPDF();
                 } else {
                   await exportSelectedAreaPNG();
                 }
-              }} title="Exportar área seleccionada" disabled={!exportArea}>
+              })(); }} title="Exportar área seleccionada" disabled={!exportArea}>
                 <span className="material-symbols-rounded">check</span>
               </IconButton>
               <IconButton color="inherit" onClick={cancelAreaSelection} title="Cancelar selección">
@@ -1761,7 +1848,7 @@ function FlowApp(): React.ReactElement {
               top: exportArea.y,
               width: exportArea.width,
               height: exportArea.height,
-              border: '2px dashed #2196f3',
+              border: '1px dashed #2196f3',
               backgroundColor: 'rgba(33, 150, 243, 0.1)',
               pointerEvents: 'none',
               zIndex: 1000
@@ -1935,7 +2022,7 @@ function FlowApp(): React.ReactElement {
               • Clic para añadir puntos
             </Typography>
             <Typography variant="caption" display="block">
-              • Enter para terminar polígono (min. 3 puntos)
+              • Enter para terminar polígono (min. 2 puntos)
             </Typography>
             <Typography variant="caption" display="block">
               • Escape para cancelar
@@ -2041,7 +2128,7 @@ function FlowApp(): React.ReactElement {
                     variant="outlined"
                     size="small"
                     onClick={(e) => setLabelBgPickerAnchor(e.currentTarget)}
-                    sx={{ minWidth: 32, width: 32, height: 32, padding: 0, backgroundColor: selectedNode.data?.backgroundColor ?? 'transparent', border: '1px solid rgba(0,0,0,0.2)' }}
+                          sx={{ minWidth: 32, width: 32, height: 32, padding: 0, backgroundColor: selectedNode.data?.backgroundColor ?? 'transparent', border: '1px solid rgba(0,0,0,0.2)' }}
                   />
                   <Typography sx={{ color: 'white', fontSize: 12 }}>Relleno</Typography>
                   <Popover
@@ -2052,7 +2139,7 @@ function FlowApp(): React.ReactElement {
                   >
                     <Box sx={{ p: 1 }}>
                       <RgbaColorPicker
-                        color={parseColorToRgba(selectedNode.data?.backgroundColor)}
+                        color={parseColorToRgba(selectedNode.data?.backgroundColor ?? 'rgba(255,255,255,0)')}
                         onChange={(c) => updateSelectedNodeData({ backgroundColor: rgbaToString(c) })}
                       />
                     </Box>
@@ -2074,7 +2161,7 @@ function FlowApp(): React.ReactElement {
                   >
                     <Box sx={{ p: 1 }}>
                       <RgbaColorPicker
-                        color={parseColorToRgba(selectedNode.data?.borderColor)}
+                        color={parseColorToRgba(selectedNode.data?.borderColor ?? '#000000')}
                         onChange={(c) => updateSelectedNodeData({ borderColor: rgbaToString(c) })}
                       />
                     </Box>
@@ -2098,7 +2185,7 @@ function FlowApp(): React.ReactElement {
                   >
                     <Box sx={{ p: 1 }}>
                       <RgbaColorPicker
-                        color={parseColorToRgba(selectedNode.data?.color)}
+                        color={parseColorToRgba(selectedNode.data?.color ?? '#000000')}
                         onChange={(c) => updateSelectedNodeData({ color: rgbaToString(c) })}
                       />
                     </Box>
@@ -2189,8 +2276,8 @@ function FlowApp(): React.ReactElement {
                 >
                   <Box sx={{ p: 1 }}>
                     <RgbaColorPicker
-                      color={parseColorToRgba(selectedNode.data?.strokeColor)}
-                      onChange={(c) => updateSelectedNodeData({ strokeColor: rgbaToString(c) })}
+                          color={parseColorToRgba(selectedNode.data?.strokeColor ?? '#2196F3')}
+                          onChange={(c) => updateSelectedNodeData({ strokeColor: rgbaToString(c) })}
                     />
                   </Box>
                 </Popover>
@@ -2211,8 +2298,12 @@ function FlowApp(): React.ReactElement {
                 >
                   <Box sx={{ p: 1 }}>
                     <RgbaColorPicker
-                      color={parseColorToRgba(selectedNode.data?.fillColor)}
-                      onChange={(c) => updateSelectedNodeData({ fillColor: rgbaToString(c) })}
+                      color={parseColorToRgba(selectedNode.data?.fillColor ?? '#2196F3', selectedNode.data?.fillOpacity)}
+                      onChange={(c) => {
+                        // Store rgb color in fillColor and alpha separately in fillOpacity
+                        const { a, ...rgb } = c as any;
+                        updateSelectedNodeData({ fillColor: `rgb(${Math.round(rgb.r)}, ${Math.round(rgb.g)}, ${Math.round(rgb.b)})`, fillOpacity: typeof c.a === 'number' ? c.a : 1 });
+                      }}
                     />
                   </Box>
                 </Popover>
@@ -2428,19 +2519,10 @@ function FlowApp(): React.ReactElement {
             //sx={{ mb: 2 }}
             slotProps={{ inputLabel: { shrink: true } }}
           />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={isTemplate}
-                onChange={(e) => setIsTemplate(e.target.checked)}
-              />
-            }
-            label="Guardar como plantilla"
-          />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowSaveDialog(false)}>Cancelar</Button>
-          <Button onClick={handleSaveSchema} variant="contained">
+          <Button onClick={() => { void handleSaveSchema(); }} variant="contained">
             {currentSchemaId ? 'Actualizar' : 'Guardar'}
           </Button>
         </DialogActions>
@@ -2450,62 +2532,88 @@ function FlowApp(): React.ReactElement {
       <Dialog open={showSchemasDialog} onClose={() => setShowSchemasDialog(false)} maxWidth="md" fullWidth>
         <DialogTitle>Esquemas Guardados</DialogTitle>
         <DialogContent>
-          <List>
-            {schemas.map((schema) => (
-              <ListItem
-                key={schema.id}
-                secondaryAction={(
-                  <>
-                    <IconButton
-                      edge="end"
-                      onClick={() => handleLoadSchema(schema)}
-                      title="Cargar esquema (reemplaza actual)"
-                      sx={{ mr: 1 }}
-                    >
-                      <span className="material-symbols-rounded">edit</span>
-                    </IconButton>
-                    <IconButton
-                      edge="end"
-                      onClick={() => handleImportSchema(schema)}
-                      title="Importar elementos al esquema actual"
-                      sx={{ mr: 1 }}
-                    >
-                      <span className="material-symbols-rounded">merge_type</span>
-                    </IconButton>
-                    <IconButton
-                      edge="end"
-                      onClick={() => handleDuplicateSchema(schema.id!, schema.name)}
-                      title="Duplicar esquema"
-                      sx={{ mr: 1 }}
-                    >
-                      <span className="material-symbols-rounded">content_copy</span>
-                    </IconButton>
-                    <IconButton
-                      edge="end"
-                      onClick={() => handleDeleteSchema(schema.id!, schema.name)}
-                      title="Eliminar esquema"
-                    >
-                      <span className="material-symbols-rounded">delete</span>
-                    </IconButton>
-                  </>
-                )}
-              >
-                <ListItemText
-                  primary={schema.name}
-                  secondary={`${schema.description ? schema.description + ' • ' : ''}Actualizado: ${new Date(schema.updated_at || '').toLocaleString()}`}
-                  secondaryTypographyProps={{
-                    component: 'span',
-                    sx: { whiteSpace: 'pre-line' }
-                  }}
-                />
-              </ListItem>
-            ))}
-            {schemas.length === 0 && (
-              <ListItem>
-                <ListItemText primary="No hay esquemas guardados" />
-              </ListItem>
-            )}
-          </List>
+            <TextField
+              margin="dense"
+              label="Buscar por nombre o descripción"
+              fullWidth
+              variant="outlined"
+              value={schemaSearch}
+              onChange={(e) => setSchemaSearch(e.target.value)}
+              slotProps={{ inputLabel: { shrink: true } }}
+            />
+            <List>
+              {(() => {
+                const q = schemaSearch.trim().toLowerCase();
+                const filtered = q
+                  ? schemas.filter(s => (s.name || '').toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q))
+                  : schemas;
+
+                if (filtered.length === 0) {
+                  return (
+                    <ListItem>
+                      <ListItemText primary={q ? 'No se encontraron resultados' : 'No hay esquemas guardados'} />
+                    </ListItem>
+                  );
+                }
+
+                return filtered.map((schema) => (
+                  <ListItem
+                    key={schema.id}
+                    secondaryAction={(
+                      <>
+                        <IconButton
+                          edge="end"
+                          onClick={() => { void handleLoadSchema(schema); }}
+                          title="Cargar esquema (reemplaza actual)"
+                          sx={{ mr: 1 }}
+                        >
+                          <span className="material-symbols-rounded">edit</span>
+                        </IconButton>
+                        <IconButton
+                          edge="end"
+                          onClick={() => { void handleImportSchema(schema); }}
+                          title="Importar elementos al esquema actual"
+                          sx={{ mr: 1 }}
+                        >
+                          <span className="material-symbols-rounded">merge_type</span>
+                        </IconButton>
+                        <IconButton
+                          edge="end"
+                          onClick={() => { void handleDuplicateSchema(schema.id!, schema.name); }}
+                          title="Duplicar esquema"
+                          sx={{ mr: 1 }}
+                        >
+                          <span className="material-symbols-rounded">content_copy</span>
+                        </IconButton>
+                        <IconButton
+                          edge="end"
+                          onClick={() => { void handleDeleteSchema(schema.id!, schema.name); }}
+                          title="Eliminar esquema"
+                        >
+                          <span className="material-symbols-rounded">delete</span>
+                        </IconButton>
+                      </>
+                    )}
+                  >
+                    <ListItemText
+                      primary={schema.name}
+                      secondary={
+                        <>
+                          {schema.description ? <span>{schema.description}<br /></span> : null}
+                          <span>
+                            Creado: {new Date(schema.created_at || '').toLocaleString()} • Usuario: {schema.created_by ?? '—'}
+                          </span>
+                        </>
+                      }
+                      secondaryTypographyProps={{
+                        component: 'span',
+                        sx: { whiteSpace: 'pre-line' }
+                      }}
+                    />
+                  </ListItem>
+                ));
+              })()}
+            </List>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowSchemasDialog(false)}>Cerrar</Button>
@@ -2533,11 +2641,13 @@ function FlowApp(): React.ReactElement {
           svgElements={svgElements}
           onSaveSvgElement={handleSaveSvgElement}
 
-          onDeleteElement={async (el) => {
-            if (!el.id) return;
-            try {
-              await deleteSvgElement(el.id); const elems = await getAllSvgElements(); setSvgElements(elems);
-            } catch (e) { console.error(e); }
+          onDeleteElement={(el) => {
+            void (async () => {
+              if (!el.id) return;
+              try {
+                await deleteSvgElement(el.id); const elems = await getAllSvgElements(); setSvgElements(elems);
+              } catch (e) { console.error(e); }
+            })();
           }}
         />
       </React.Suspense>

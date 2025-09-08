@@ -51,6 +51,10 @@ const LabelNode: React.FC<NodeProps<Data>> = ({ id, data, selected }) => {
     }
   }, [id, rotation, scale, flipX, flipY, updateNodeInternals]);
 
+  const borderStyle = (borderWidth && borderWidth > 0)
+    ? `${borderWidth}px solid ${borderColor}`
+    : (selected ? '1px dashed rgba(33,150,243,0.8)' : 'none');
+
   return (
     <div
       onDoubleClick={() => setEditing(true)}
@@ -61,7 +65,7 @@ const LabelNode: React.FC<NodeProps<Data>> = ({ id, data, selected }) => {
         padding: '4px 8px',
         cursor: 'text',
         userSelect: 'none',
-        border: borderColor ? `${borderWidth}px solid ${borderColor}` : (selected ? '1px dashed rgba(0,0,0,0.4)' : 'none'),
+        border: borderStyle,
         borderRadius: 4,
         background: backgroundColor,
         transform: `rotate(${rotation}deg) scale(${scale}) scaleX(${flipX ? -1 : 1}) scaleY(${flipY ? -1 : 1})`,

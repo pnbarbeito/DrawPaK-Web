@@ -31,7 +31,7 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
         setTimeout(async () => {
           const updatedCategories = await getSvgCategories();
           if (updatedCategories.length > 0) {
-            await loadElementsForCategories(updatedCategories);
+            void loadElementsForCategories(updatedCategories);
           }
         }, 1000);
         return;
@@ -63,12 +63,12 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
   };
 
   useEffect(() => {
-    loadElements();
+  void loadElements();
   }, [loadElements]);
 
   // Listen for external updates (e.g. when user saves a new SVG) and reload palette
   useEffect(() => {
-    const onUpdated = () => { loadElements(); };
+    const onUpdated = () => { void loadElements(); };
     window.addEventListener('svg-elements-updated', onUpdated as EventListener);
     return () => window.removeEventListener('svg-elements-updated', onUpdated as EventListener);
   }, [loadElements]);
@@ -192,8 +192,8 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
                                   const wAttr = svgEl.getAttribute('width');
                                   const hAttr = svgEl.getAttribute('height');
                                   if (!vb && wAttr && hAttr) {
-                                    const pw = parseFloat(wAttr as string);
-                                    const ph = parseFloat(hAttr as string);
+                                    const pw = parseFloat(wAttr);
+                                    const ph = parseFloat(hAttr);
                                     if (!isNaN(pw) && !isNaN(ph) && pw > 0 && ph > 0) {
                                       svgEl.setAttribute('viewBox', `0 0 ${pw} ${ph}`);
                                     }
