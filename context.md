@@ -60,7 +60,7 @@ DrawPaK Web es una aplicación web interactiva para crear diagramas eléctricos 
 │       ├── DynamicPalette.tsx        # Paleta de símbolos
 │       ├── SymbolNode.tsx            # Nodo de símbolo en ReactFlow
 │       ├── LabelNode.tsx             # Nodo de texto/etiqueta
-│       ├── PolygonNode.tsx           # Nodo de polígono (vacío)
+│       ├── PolygonNode.tsx           # Nodo de polígono (implementado)
 │       ├── SvgEditorDialog.tsx       # Editor SVG modal
 │       ├── SvgShapeEditor.tsx        # Editor de formas SVG
 │       ├── symbols.tsx               # Definiciones de símbolos por defecto
@@ -79,7 +79,7 @@ DrawPaK Web es una aplicación web interactiva para crear diagramas eléctricos 
 
 ## Componentes Principales
 
-### FlowApp.tsx (2073 líneas)
+### FlowApp.tsx (2397 líneas)
 - **Propósito**: Componente principal que gestiona todo el flujo de la aplicación
 - **Características**:
   - Gestión de estado de nodos y conexiones ReactFlow
@@ -142,7 +142,7 @@ DrawPaK Web es una aplicación web interactiva para crear diagramas eléctricos 
 - **CssBaseline**: Habilitado para reset CSS
 
 ### ReactFlow
-- **Tipos de nodo**: symbolNode, labelNode
+- **Tipos de nodo**: symbolNode, labelNode, polygonNode
 - **Tipos de conexión**: smoothstep por defecto
 - **Grid**: 20x20 píxeles
 - **Estilos**: CSS importado desde 'reactflow/dist/style.css'
@@ -196,7 +196,6 @@ bun preview  # Preview del build
 - Base de datos IndexedDB
 
 ### En Desarrollo 🚧
-- PolygonNode.tsx (archivo vacío)
 - Posibles mejoras en UX
 
 ### Arquitectura

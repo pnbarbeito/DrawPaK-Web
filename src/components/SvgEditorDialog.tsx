@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, FormControlLabel, Checkbox, Typography, Select, MenuItem, FormControl, InputLabel } from '@mui/material';
+import { Box, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, FormControlLabel, Checkbox, Typography, Select, MenuItem, FormControl, InputLabel, Slider } from '@mui/material';
 import SvgShapeEditor from './SvgShapeEditor';
 // Replaced MUI icons with material symbol spans
 type Props = {
@@ -389,22 +389,35 @@ const SvgEditorDialog: React.FC<Props> = ({
           />
           {/* Slider for visual display scale: visible only when editor is active */}
           {useEditor && (
-            <div style={{ display: 'flex', alignItems: 'center', marginLeft: '8px', gap: 8 }}>
-              <div style={{ width: 220 }}>
-                <input
-                  type="range"
-                  min="0.5"
-                  max="6"
-                  step="0.1"
-                  value={typeof dialogDisplayScale === 'number' ? dialogDisplayScale : 3}
-                  onChange={(e) => setDialogDisplayScale(Number(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-              </div>
-              <div style={{ minWidth: 48 }}><strong>{(typeof dialogDisplayScale === 'number' ? dialogDisplayScale : 3).toFixed(1)}x</strong></div>
-            </div>
-          )}
-        </Box>
+            <>
+              <Typography id="input-slider" sx={{mr:2}}>
+                Escala del editor: 
+              </Typography>
+            <Box sx={{ width: 300 }}>
+              <Slider
+                aria-label="Custom marks"
+                defaultValue={3}
+                getAriaValueText={() => (typeof dialogDisplayScale === 'number' ? dialogDisplayScale.toFixed(1) : '3')}
+                step={0.1}
+                min={0.5}
+                max={6}
+                value={typeof dialogDisplayScale === 'number' ? dialogDisplayScale : 3}
+                onChange={(_, v) => setDialogDisplayScale(typeof v === 'number' ? v : 3)}
+                marks={[
+                  { value: 0.5, label: '0.5x' },
+                  { value: 1, label: '1x' },
+                  { value: 2, label: '2x' },
+                  { value: 3, label: '3x' },
+                  { value: 4, label: '4x' },
+                  { value: 5, label: '5x' },
+                  { value: 6, label: '6x' },
+                ]}
+                valueLabelDisplay="auto"
+              />
+            </Box>
+          </>
+        )}
+      </Box>
 
         {useEditor ? (
           <>

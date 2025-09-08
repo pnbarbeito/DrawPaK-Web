@@ -113,6 +113,10 @@ function FlowApp(): React.ReactElement {
     primaryColor?: string;
     borderColor?: string;
     borderWidth?: number;
+  // Polygon visual properties
+  strokeWidth?: number;
+  strokeColor?: string;
+  fillColor?: string;
   };
   type ElectEdgeData = Record<string, unknown>;
   // Use React Flow's Edge type for correctness (id is required)
@@ -129,6 +133,49 @@ function FlowApp(): React.ReactElement {
   const [labelBgPickerAnchor, setLabelBgPickerAnchor] = React.useState<HTMLElement | null>(null);
   const [labelBorderPickerAnchor, setLabelBorderPickerAnchor] = React.useState<HTMLElement | null>(null);
   const [labelTextColorAnchor, setLabelTextColorAnchor] = React.useState<HTMLElement | null>(null);
+  const [polygonStrokePickerAnchor, setPolygonStrokePickerAnchor] = React.useState<HTMLElement | null>(null);
+  const [polygonFillPickerAnchor, setPolygonFillPickerAnchor] = React.useState<HTMLElement | null>(null);
+  // Username management: required before performing actions
+  const [username, setUsername] = React.useState<string | null>(localStorage.getItem('dp_username'));
+  const [usernameInput, setUsernameInput] = React.useState<string>('');
+  const [showUsernameDialog, setShowUsernameDialog] = React.useState<boolean>(false);
+
+  const isValidUsername = React.useCallback((u?: string | null) => {
+    if (!u) return false;
+    return /^[a-zA-Z0-9]{6,}$/.test(u);
+  }, []);
+
+  const requireValidUser = React.useCallback(() => {
+    if (!isValidUsername(username)) {
+      setUsernameInput('');
+      setShowUsernameDialog(true);
+      return false;
+    }
+    return true;
+  }, [isValidUsername, username]);
+
+  const handleUsernameSave = React.useCallback(() => {
+    if (!isValidUsername(usernameInput)) return;
+    localStorage.setItem('dp_username', usernameInput);
+    setUsername(usernameInput);
+    setShowUsernameDialog(false);
+  }, [usernameInput, isValidUsername]);
+
+  const handleUsernameCancel = React.useCallback(() => {
+    // If no valid username yet, keep dialog open (force); otherwise close
+    if (!isValidUsername(username)) {
+      // keep dialog open, no-op
+      return;
+    }
+    setShowUsernameDialog(false);
+  }, [isValidUsername, username]);
+
+  // On mount ensure we prompt for username if missing/invalid
+  React.useEffect(() => {
+    if (!isValidUsername(username)) {
+      setShowUsernameDialog(true);
+    }
+  }, [isValidUsername, username]);
   // Helpers: parse hex / rgba strings to an object usable by RgbaColorPicker
   function hexToRgb(hex: string) {
     const cleaned = hex.replace('#', '').trim();
@@ -1026,11 +1073,10 @@ function FlowApp(): React.ReactElement {
         .polygon-drawing-mode {
           cursor: crosshair !important;
         }
-        .polygon-drawing-mode .react-flow__node {
-          cursor: crosshair !important;
-        }
+        /* Allow clicking through nodes/edges while drawing polygon */
+        .polygon-drawing-mode .react-flow__node,
         .polygon-drawing-mode .react-flow__edge {
-          cursor: crosshair !important;
+          pointer-events: none !important;
         }
       `;
     } else {
@@ -1043,7 +1089,8 @@ function FlowApp(): React.ReactElement {
         existingStyle.textContent = '';
       }
     };
-  }, [isDrawingPolygon]);
+  }, [isDrawingPolygon, isValidUsername, username, requireValidUser]);
+
 
   // Debug para el diálogo de guardar
   React.useEffect(() => {
@@ -1052,16 +1099,21 @@ function FlowApp(): React.ReactElement {
 
   // Funciones para manejo de polígonos
   const togglePolygonMode = useCallback(() => {
-    setIsDrawingPolygon(prev => !prev);
+  if (!requireValidUser()) return;
+  setIsDrawingPolygon(prev => !prev);
     // Si estamos saliendo del modo polígono, limpiar puntos temporales
     if (isDrawingPolygon) {
       setCurrentPolygonPoints([]);
       setMousePosition(null);
     }
-  }, [isDrawingPolygon]);
+  }, [isDrawingPolygon, requireValidUser]);
 
   const addPolygonPoint = useCallback((event: React.MouseEvent) => {
     if (!isDrawingPolygon || !reactFlowWrapper.current || !reactFlowInstance.current) return;
+    if (!isValidUsername(username)) {
+      setShowUsernameDialog(true);
+      return;
+    }
 
     const rect = reactFlowWrapper.current.getBoundingClientRect();
     
@@ -1081,6 +1133,7 @@ function FlowApp(): React.ReactElement {
       
       setCurrentPolygonPoints(prev => [...prev, snappedPosition]);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDrawingPolygon]);
 
   const finishPolygon = useCallback(() => {
@@ -1088,14 +1141,22 @@ function FlowApp(): React.ReactElement {
       // Crear nuevo nodo polígono
       const polygonId = `polygon_${Date.now()}`;
       
-      // Calcular posición del nodo (esquina superior izquierda del bounding box)
+      // Calcular posici f3n del nodo (esquina superior izquierda del bounding box)
       const minX = Math.min(...currentPolygonPoints.map(p => p.x));
       const minY = Math.min(...currentPolygonPoints.map(p => p.y));
+
+      // PolygonNode añade un padding interno de 10px al renderizado y reubica
+      // los puntos relativos usando `x - minX + 10`. Para que la forma final
+      // se alinee con la grid usada al dibujar, colocamos el nodo en
+      // (minX - 10, minY - 10) para compensar dicho padding.
+      const INNER_PADDING = 10;
+      const nodePosX = minX - INNER_PADDING;
+      const nodePosY = minY - INNER_PADDING;
 
       const newPolygonNode: Node = {
         id: polygonId,
         type: 'polygonNode',
-        position: { x: minX, y: minY },
+        position: { x: nodePosX, y: nodePosY },
         data: {
           points: currentPolygonPoints,
           strokeColor: '#2196F3',
@@ -1210,7 +1271,8 @@ function FlowApp(): React.ReactElement {
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
-      if (!reactFlowWrapper.current) return;
+  if (!reactFlowWrapper.current) return;
+  if (!requireValidUser()) return;
 
       const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
       const symbolKey = event.dataTransfer.getData('application/reactflow');
@@ -1264,7 +1326,7 @@ function FlowApp(): React.ReactElement {
 
       setNodes((nds) => nds.concat(newNode));
     },
-    [setNodes, nodes],
+  [setNodes, nodes, requireValidUser],
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -1981,7 +2043,7 @@ function FlowApp(): React.ReactElement {
                     onClick={(e) => setLabelBgPickerAnchor(e.currentTarget)}
                     sx={{ minWidth: 32, width: 32, height: 32, padding: 0, backgroundColor: selectedNode.data?.backgroundColor ?? 'transparent', border: '1px solid rgba(0,0,0,0.2)' }}
                   />
-                  <Typography sx={{ color: 'white', fontSize: 12 }}>Fondo</Typography>
+                  <Typography sx={{ color: 'white', fontSize: 12 }}>Relleno</Typography>
                   <Popover
                     open={!!labelBgPickerAnchor}
                     anchorEl={labelBgPickerAnchor}
@@ -2003,7 +2065,7 @@ function FlowApp(): React.ReactElement {
                     onClick={(e) => setLabelBorderPickerAnchor(e.currentTarget)}
                     sx={{ minWidth: 32, width: 32, height: 32, padding: 0, backgroundColor: selectedNode.data?.borderColor ?? 'transparent', border: '1px solid rgba(0,0,0,0.2)' }}
                   />
-                  <Typography sx={{ color: 'white', fontSize: 12 }}>Borde</Typography>
+                  <Typography sx={{ color: 'white', fontSize: 12 }}>Color línea</Typography>
                   <Popover
                     open={!!labelBorderPickerAnchor}
                     anchorEl={labelBorderPickerAnchor}
@@ -2027,7 +2089,7 @@ function FlowApp(): React.ReactElement {
                     onClick={(e) => setLabelTextColorAnchor(e.currentTarget)}
                     sx={{ minWidth: 32, width: 32, height: 32, padding: 0, backgroundColor: selectedNode.data?.color ?? 'transparent', border: '1px solid rgba(0,0,0,0.2)' }}
                   />
-                  <Typography sx={{ color: 'white', fontSize: 12 }}>Texto</Typography>
+                  <Typography sx={{ color: 'white', fontSize: 12 }}>Color texto</Typography>
                   <Popover
                     open={!!labelTextColorAnchor}
                     anchorEl={labelTextColorAnchor}
@@ -2045,7 +2107,7 @@ function FlowApp(): React.ReactElement {
                 <TextField
                   size="small"
                   type="number"
-                  label="Ancho borde"
+                  label="Ancho línea"
                   value={selectedNode.data?.borderWidth ?? 0}
                   onChange={(e) => {
                     const v = Number(e.target.value);
@@ -2074,6 +2136,86 @@ function FlowApp(): React.ReactElement {
                     },
                   }}
                 />
+              </Box>
+            </Box>
+          ) : selectedNode.type === 'polygonNode' ? (
+            // Controls dedicated for polygon nodes (only polygon properties)
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, color: 'white', width: 260 }}>
+              <TextField
+                size="small"
+                type="number"
+                label="Ancho línea"
+                value={selectedNode.data?.strokeWidth ?? 2}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (isNaN(v)) return;
+                  updateSelectedNodeData({ strokeWidth: v });
+                }}
+                sx={{
+                    width: '100%',
+                    borderColor: 'white',
+                    '& .MuiOutlinedInput-root': {
+                      '& fieldset': {
+                        borderColor: 'white',
+                      },
+                      '&:hover fieldset': {
+                        borderColor: 'white',
+                      },
+                      '&.Mui-focused fieldset': {
+                        borderColor: 'white',
+                      },
+                    },
+                    '& .MuiInputLabel-root': {
+                      color: 'white',
+                    },
+                    '& .MuiInputBase-input': {
+                      color: 'white',
+                    },
+                  }}
+              />
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={(e) => setPolygonStrokePickerAnchor(e.currentTarget)}
+                  sx={{ minWidth: 32, width: 32, height: 32, padding: 0, backgroundColor: selectedNode.data?.strokeColor ?? '#2196F3', border: '1px solid rgba(0,0,0,0.2)' }}
+                />
+                <Typography sx={{ color: 'white', fontSize: 12 }}>Color línea</Typography>
+                <Popover
+                  open={!!polygonStrokePickerAnchor}
+                  anchorEl={polygonStrokePickerAnchor}
+                  onClose={() => setPolygonStrokePickerAnchor(null)}
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+                >
+                  <Box sx={{ p: 1 }}>
+                    <RgbaColorPicker
+                      color={parseColorToRgba(selectedNode.data?.strokeColor)}
+                      onChange={(c) => updateSelectedNodeData({ strokeColor: rgbaToString(c) })}
+                    />
+                  </Box>
+                </Popover>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={(e) => setPolygonFillPickerAnchor(e.currentTarget)}
+                  sx={{ minWidth: 32, width: 32, height: 32, padding: 0, backgroundColor: selectedNode.data?.fillColor ?? 'rgba(33,150,243,0.1)', border: '1px solid rgba(0,0,0,0.2)' }}
+                />
+                <Typography sx={{ color: 'white', fontSize: 12 }}>Relleno</Typography>
+                <Popover
+                  open={!!polygonFillPickerAnchor}
+                  anchorEl={polygonFillPickerAnchor}
+                  onClose={() => setPolygonFillPickerAnchor(null)}
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+                >
+                  <Box sx={{ p: 1 }}>
+                    <RgbaColorPicker
+                      color={parseColorToRgba(selectedNode.data?.fillColor)}
+                      onChange={(c) => updateSelectedNodeData({ fillColor: rgbaToString(c) })}
+                    />
+                  </Box>
+                </Popover>
               </Box>
             </Box>
           ) : (
@@ -2167,7 +2309,7 @@ function FlowApp(): React.ReactElement {
                     onClick={(e) => setBgPickerAnchor(e.currentTarget)}
                     sx={{ minWidth: 32, width: 32, height: 32, padding: 0, backgroundColor: selectedNode.data?.backgroundColor ?? 'rgba(255, 255, 255, 0)', border: '1px solid rgba(0,0,0,0.2)' }}
                   />
-                  <Typography sx={{ color: 'white', fontSize: 12 }}>Fondo</Typography>
+                  <Typography sx={{ color: 'white', fontSize: 12 }}>Relleno</Typography>
                   <Popover
                     open={!!bgPickerAnchor}
                     anchorEl={bgPickerAnchor}
@@ -2189,7 +2331,7 @@ function FlowApp(): React.ReactElement {
                     onClick={(e) => setPrimaryPickerAnchor(e.currentTarget)}
                     sx={{ minWidth: 32, width: 32, height: 32, padding: 0, backgroundColor: selectedNode.data?.primaryColor ?? 'rgba(0, 0, 0, 1)', border: '1px solid rgba(0,0,0,0.2)' }}
                   />
-                  <Typography sx={{ color: 'white', fontSize: 12 }}>Lineas</Typography>
+                  <Typography sx={{ color: 'white', fontSize: 12 }}>Color línea</Typography>
                   <Popover
                     open={!!primaryPickerAnchor}
                     anchorEl={primaryPickerAnchor}
@@ -2234,6 +2376,28 @@ function FlowApp(): React.ReactElement {
           <Button onClick={confirmNewSchema} variant="contained" color="error">
             Crear Nuevo
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Diálogo para pedir nombre de usuario (requerido) */}
+      <Dialog open={showUsernameDialog} onClose={handleUsernameCancel} maxWidth="xs">
+        <DialogTitle>Nombre de usuario requerido</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 1 }}>Introduce un nombre de usuario alfanumérico (mínimo 6 caracteres).</Typography>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Nombre de usuario"
+            fullWidth
+            variant="outlined"
+            value={usernameInput}
+            onChange={(e) => setUsernameInput(e.target.value)}
+            helperText={usernameInput && !isValidUsername(usernameInput) ? 'Debe ser alfanumérico y al menos 6 caracteres' : ''}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleUsernameCancel}>Cancelar</Button>
+          <Button onClick={handleUsernameSave} variant="contained">Aceptar</Button>
         </DialogActions>
       </Dialog>
 

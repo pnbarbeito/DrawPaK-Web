@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Box, Button, TextField, Checkbox, FormControlLabel, Slider, Typography } from '@mui/material';
+import { Box, Button, TextField, Checkbox, FormControlLabel, Slider, Typography, InputAdornment } from '@mui/material';
 // Replaced MUI icons with material symbol spans
 type Handle = { id: string; x: number; y: number; type?: 'source' | 'target' };
 type BaseShape = {
@@ -763,8 +763,31 @@ const SvgShapeEditor: React.FC<Props> = ({ width = 120, height = 120, onChange, 
         </Box>
         {/* Z-order controls moved into the selected-shape properties panel */}
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
-          <TextField label="Ancho" type="number" size="small" value={canvasWidth} onChange={(e) => setCanvasWidth(Number(e.target.value) || 100)} sx={{ width: 100, mr: 1 }} />
-          <TextField label="Alto" type="number" size="small" value={canvasHeight} onChange={(e) => setCanvasHeight(Number(e.target.value) || 100)} sx={{ width: 100 }} />
+          <TextField
+            label="Ancho"
+            type="number"
+            size="small"
+            value={canvasWidth}
+            slotProps={{
+              input: {
+                endAdornment: <InputAdornment position="end">px</InputAdornment>,
+              },
+            }}
+            onChange={(e) => setCanvasWidth(Number(e.target.value) || 100)}
+            sx={{ width: 100, mr: 1 }}
+          />
+          <TextField
+            label="Alto"
+            type="number"
+            size="small"
+            value={canvasHeight}
+            slotProps={{
+              input: {
+                endAdornment: <InputAdornment position="end">px</InputAdornment>,
+              },
+            }}
+            onChange={(e) => setCanvasHeight(Number(e.target.value) || 100)}
+            sx={{ width: 100 }} />
         </Box>
       </Box>
 

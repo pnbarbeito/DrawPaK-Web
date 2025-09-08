@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useUpdateNodeInternals } from 'reactflow';
+import { useUpdateNodeInternals, useReactFlow } from 'reactflow';
 import type { NodeProps } from 'reactflow';
 
 type Data = {
@@ -20,6 +20,7 @@ const LabelNode: React.FC<NodeProps<Data>> = ({ id, data, selected }) => {
   const [text, setText] = useState(data?.label ?? 'Etiqueta');
   const inputRef = useRef<HTMLInputElement | null>(null);
   const updateNodeInternals = useUpdateNodeInternals();
+  const { setNodes } = useReactFlow();
 
   useEffect(() => {
     setText(data?.label ?? 'Etiqueta');
@@ -68,18 +69,26 @@ const LabelNode: React.FC<NodeProps<Data>> = ({ id, data, selected }) => {
       }}
     >
       {editing ? (
-        <input
-          ref={inputRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={() => setEditing(false)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              (e.target as HTMLInputElement).blur();
-            }
-          }}
-          style={{ fontSize, color, border: '1px solid #ccc', padding: '2px 6px', borderRadius: 4 }}
-        />
+          <input
+            ref={inputRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={() => {
+              // Persist the edited label into the node data so it survives save/refresh
+              setEditing(false);
+              try {
+                setNodes((nds) => nds.map((n) => n.id === id ? { ...n, data: { ...n.data, label: text } } : n));
+              } catch {
+                // If setNodes is not available for some reason, silently ignore
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            style={{ fontSize, color, border: '1px solid #ccc', padding: '2px 6px', borderRadius: 4 }}
+          />
       ) : (
         <div style={{ fontSize, color }}>{text}</div>
       )}
