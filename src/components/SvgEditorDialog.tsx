@@ -20,7 +20,9 @@ type Props = {
   setUseEditor: (v: boolean) => void;
   sanitizedSvg: string;
   svgElements: import('./database.ts').SvgElement[];
-  onSaveSvgElement: () => void | Promise<void>;
+  // When saving, caller may accept an optional 'local' flag to control storage
+  // local=true means do not store in cloud (store locally only)
+  onSaveSvgElement: (local?: boolean) => void | Promise<void>;
   onDeleteElement: (el: import('./database.ts').SvgElement) => void;
 };
 
@@ -43,6 +45,7 @@ const SvgEditorDialog: React.FC<Props> = ({
   const [dialogDisplayScale, setDialogDisplayScale] = React.useState<number | undefined>(undefined);
   const [categoryFilter, setCategoryFilter] = React.useState<string>('all');
   const [searchQuery, setSearchQuery] = React.useState<string>('');
+  const [svgLocal, setSvgLocal] = React.useState<boolean>(false); // false = save to cloud by default
 
   const STORAGE_KEY = 'svgShapeEditor.draft.v1';
 
@@ -560,6 +563,10 @@ const SvgEditorDialog: React.FC<Props> = ({
         </Box>
       </DialogContent>
       <DialogActions>
+        <FormControlLabel
+          control={<Checkbox checked={svgLocal} onChange={(e) => setSvgLocal(e.target.checked)} />}
+          label="No guardar en la nube"
+        />
         <Button onClick={handleClearAll} color="error" startIcon={<span className="material-symbols-rounded">delete</span>}>Limpiar</Button>
         <Button onClick={onClose} color="warning" startIcon={<span className="material-symbols-rounded">close</span>}>Cancelar</Button>
         <Button
@@ -567,7 +574,7 @@ const SvgEditorDialog: React.FC<Props> = ({
             void (async () => {
               try {
                 // call parent's save handler (may be sync or async)
-                await Promise.resolve(onSaveSvgElement());
+                await Promise.resolve(onSaveSvgElement(svgLocal));
                 // If save succeeded, clear the editor inputs and draft
                 try { handleClearAll(); } catch { /* ignore */ }
               } catch (e) {

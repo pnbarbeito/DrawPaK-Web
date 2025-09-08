@@ -10,7 +10,9 @@ export interface Schema {
   edges: string; // JSON string de las conexiones
   created_at?: string;
   created_by?: string;
+  updated_by?: string;
   updated_at?: string;
+  local?: boolean; // true = only stored in browser DB
 }
 
 export interface SvgElement {
@@ -22,7 +24,9 @@ export interface SvgElement {
   handles?: string; // JSON string of handles metadata
   created_at?: string;
   created_by?: string;
+  updated_by?: string;
   updated_at?: string;
+  local?: boolean;
 }
 
 // Dexie (IndexedDB) backed implementation for browser
@@ -35,8 +39,8 @@ class DrawPakDB extends Dexie {
   constructor() {
     super('drawpak');
     this.version(1).stores({
-      schemas: '++id,name,updated_at',
-      svg_elements: '++id,name,category,updated_at'
+  schemas: '++id,name,updated_at,local',
+  svg_elements: '++id,name,category,updated_at,local'
     });
     this.schemas = this.table('schemas');
     this.svg_elements = this.table('svg_elements');
@@ -123,7 +127,9 @@ export async function saveSchema(schema: Schema): Promise<number> {
     ...schema,
     created_at: schema.created_at || now,
     created_by: schema.created_by || undefined,
-    updated_at: now
+  updated_by: schema.updated_by || schema.created_by || undefined,
+  updated_at: now,
+  local: typeof schema.local === 'boolean' ? schema.local : false
   };
 
   if (toSave.id && typeof toSave.id === 'number') {
@@ -139,7 +145,7 @@ export async function updateSchema(id: number, schema: Partial<Schema>): Promise
   await initDatabase();
   const cur = await db.schemas.get(id);
   if (!cur) throw new Error('Esquema no encontrado');
-  const updated: Schema = { ...cur, ...schema, updated_at: nowIso() } as Schema;
+  const updated: Schema = { ...cur, ...schema, updated_at: nowIso(), updated_by: schema.updated_by || cur.updated_by || cur.created_by, local: typeof schema.local === 'boolean' ? schema.local : cur.local } as Schema;
   await db.schemas.put(updated);
 }
 
@@ -168,9 +174,11 @@ export async function duplicateSchema(id: number, newName: string): Promise<numb
     description: original.description,
     nodes: original.nodes,
     edges: original.edges,
-    created_at: nowIso(),
-    created_by: original.created_by || undefined,
-    updated_at: nowIso()
+  created_at: nowIso(),
+  created_by: original.created_by || undefined,
+  updated_by: original.updated_by || original.created_by || undefined,
+  updated_at: nowIso(),
+  local: original.local !== undefined ? original.local : false
   };
   return await saveSchema(copy);
 }
@@ -183,7 +191,9 @@ export async function saveSvgElement(elem: SvgElement): Promise<number> {
     ...elem,
     created_at: elem.created_at || now,
     created_by: elem.created_by || undefined,
-    updated_at: now
+  updated_by: elem.updated_by || elem.created_by || undefined,
+  updated_at: now,
+  local: typeof elem.local === 'boolean' ? elem.local : false
   };
 
   if (toSave.id && typeof toSave.id === 'number') {
@@ -199,7 +209,7 @@ export async function updateSvgElement(id: number, elem: Partial<SvgElement>): P
   await initDatabase();
   const cur = await db.svg_elements.get(id);
   if (!cur) throw new Error('SVG element not found');
-  const updated: SvgElement = { ...cur, ...elem, updated_at: nowIso() } as SvgElement;
+  const updated: SvgElement = { ...cur, ...elem, updated_at: nowIso(), updated_by: elem.updated_by || cur.updated_by || cur.created_by, local: typeof elem.local === 'boolean' ? elem.local : cur.local } as SvgElement;
   await db.svg_elements.put(updated);
 }
 

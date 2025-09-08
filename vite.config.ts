@@ -14,16 +14,7 @@ export default defineConfig({
         // Split big vendor chunks. Keep sensible groups for React + libs, heavy libs separate.
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom') || id.includes('reactflow')) {
-              return 'vendor_react'
-            }
-            if (id.includes('material') || id.includes('@mui')) {
-              return 'vendor_mui'
-            }
-            if (id.includes('html-to-image') || id.includes('html2canvas') || id.includes('jspdf')) {
-              return 'vendor_exporters'
-            }
-            return 'vendor_misc'
+            return 'vendor'; // All node_modules in a single chunk
           }
         }
       }
