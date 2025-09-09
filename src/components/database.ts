@@ -858,7 +858,8 @@ export async function initializeBasicElementsOriginal(): Promise<void> {
             handles: element.handles || '',
             created_at: nowIso(),
             created_by: 'pbarbeito',
-            updated_at: nowIso()
+            updated_at: nowIso(),
+            updated_by: 'pbarbeito'
           };
           await db.svg_elements.add(elem);
           //console.log(`Elemento guardado: ${element.name} (${element.category})`);

@@ -1,7 +1,5 @@
 import React, { useEffect, useRef } from 'react';
 import { Handle, Position, useUpdateNodeInternals } from 'reactflow';
-import SYMBOLS from './symbols';
-import type { SymbolEntry } from './symbols';
 
 type SymbolNodeProps = {
   id: string;
@@ -51,9 +49,6 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
     allDataKeys: Object.keys(data)
   });
   */
-  // Si tenemos un elemento SVG dinámico, usarlo; sino, usar el símbolo estático
-  let entry: SymbolEntry | undefined;
-  let symbol: React.ReactNode = null;
   let size = { w: 48, h: 48 };
   let inlineSvgMarkup: string | undefined;
 
@@ -69,35 +64,14 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
         size = { w: viewBoxValues[2], h: viewBoxValues[3] };
       }
     }
-  } else if (isDynamicSvg && !effectiveSvg) {
+  } else {
     // PROBLEMA: Se esperaba SVG dinámico pero no está presente
     console.error(`❌ PROBLEMA ENCONTRADO - Node ${id}: isDynamicSvg=true pero no hay svg en data ni preservado`, {
       dataKeys: Object.keys(data),
       hasPreservedData: !!preservedSvgData,
       fullData: data
     });
-  } else {
-    // Símbolo estático del catálogo existente
-    entry = (SYMBOLS as Record<string, SymbolEntry | undefined>)[symbolKey];
-    symbol = entry?.svg ?? null;
-
-    // If node data provides size (from inserted custom SVG), prefer it
-    // Access optional size safely
-    const maybeSize = (data as unknown as { size?: unknown }).size;
-    const providedSize = (() => {
-      if (typeof maybeSize !== 'object' || maybeSize === null) return undefined;
-      const ms = maybeSize as Record<string, unknown>;
-      const hasW = 'w' in ms && (typeof ms.w === 'number' || typeof ms.w === 'string');
-      const hasH = 'h' in ms && (typeof ms.h === 'number' || typeof ms.h === 'string');
-      if (!hasW || !hasH) return undefined;
-      return { w: Number(ms.w) || 48, h: Number(ms.h) || 48 };
-    })();
-    size = providedSize ?? entry?.size ?? { w: 48, h: 48 };
-
-    // If node provides inline svg markup in data.svg, prefer it (safely)
-    const maybeSvg = (data as unknown as { svg?: unknown }).svg;
-    inlineSvgMarkup = typeof maybeSvg === 'string' ? maybeSvg : undefined;
-  }
+  } 
 
   const inlineWrapperRef = useRef<HTMLDivElement | null>(null);
 
@@ -128,10 +102,6 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
       );
     }
 
-    if (symbol) {
-      return symbol;
-    }
-
     return (
       <div style={{
         width: '100%',
@@ -147,7 +117,7 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
         {symbolKey || 'ERROR'}
       </div>
     );
-  }, [inlineSvgMarkup, symbol, symbolKey, id]);
+  }, [inlineSvgMarkup, symbolKey, id]);
 
   // Normalize inline SVG so it fits the container: ensure viewBox exists (if possible), remove fixed width/height, and force CSS width/height 100%
   useEffect(() => {
