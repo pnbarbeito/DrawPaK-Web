@@ -14,6 +14,15 @@ DrawPaK Web es una aplicación web interactiva para crear diagramas eléctricos 
 - Guardar y cargar esquemas en base de datos local (IndexedDB)
 - Exportar diagramas a PNG y PDF
 - Editor SVG integrado para crear símbolos personalizados
+ 
+## Cambios recientes importantes
+
+- Separación de color y opacidad en nodos: ahora los datos de nodo usan `fillColor` (string RGB) y `fillOpacity` (number, 0..1). Esto evita pérdida de alpha cuando alpha = 0 y permite que los pickers muestren/transmitan alpha por separado.
+- Polígonos: PADDING unificado a 10px. Los puntos SVG se almacenan en coordenadas absolutas; `PolygonNode` renderiza restando el bounding box menos `PADDING` y la función que finaliza el polígono (`finishPolygon`) posiciona el nodo en `minXY - PADDING` para evitar desplazamientos visuales al seleccionar.
+- Persistencia local (IndexedDB / Dexie): agregados campos `updated_by?: string` y `local?: boolean` tanto en `Schema` como en `SvgElement`. `local` ahora por defecto es `false` (significa: intención de guardar en la nube). Las funciones de guardado/actualización (`saveSchema`, `updateSchema`, `saveSvgElement`, `updateSvgElement`, `duplicateSchema`) establecen `updated_by` y `local` cuando corresponde.
+- UI: cuadros "No guardar en la nube" (checkbox) añadidos en el diálogo "Guardar Esquema" y en el pie del editor SVG (`SvgEditorDialog`) — al guardar pasan la bandera `local` al flujo de persistencia.
+- Diálogo "Esquemas guardados": ahora muestra `description` y `created_by` y soporta búsqueda/filter por nombre/description.
+- Backend PHP: se añadió un micro-backend en `public/index.php` (y un router/versión apropiada en `dist/index.php` para preview/build). El backend expone endpoints REST bajo `/api/...` (`/api/health`, `/api/schemas`, `/api/svgs`) y persiste en SQLite (`public/data.sqlite`). El servidor también puede servir la SPA compilada (ficheros estáticos) desde `dist/`.
 
 ## Stack Tecnológico
 
@@ -297,6 +306,14 @@ Notas:
 - `src/components/SvgEditorDialog.tsx` — editor de SVG (usa `SvgShapeEditor` interno).
 - `src/components/SymbolNode.tsx`, `LabelNode.tsx`, `AreaNode.tsx` — nodos custom para ReactFlow.
 - `public/` — assets estáticos.
+ - `dist/` — output del build (contiene `index.html`, `assets/` y opcional router `dist/index.php` si se crea)
+
+### Archivos de servidor y despliegue
+
+`public/index.php` — micro-backend PHP (dev): API bajo `/api/*`, inicializa `public/data.sqlite` y ofrece CRUD para `schemas` y `svgs`. (el `index.php` fue movido a `public/` para desplegarlo junto con el frontend compilado)
+- `dist/index.php` — router para preview/producción: cuando se usa con `php -S` sirve ficheros estáticos desde `dist/` y enruta `/api/*` hacia la lógica PHP (útil para preview del build).
+- Nota: si prefieres incluir el router junto al frontend compilado, mueve `index.php` a `public/` o a la raíz de `dist/`.
+
 
 ## 4) Modelos de datos y API interna
 
@@ -340,6 +357,47 @@ Funciones públicas (DB API)
 Notas:
 - `initDatabase()` ejecuta migración desde localStorage si corresponde y si no hay elementos hace un seeding con elementos básicos.
 - Las funciones llaman `initDatabase()` internamente para garantizar disponibilidad.
+
+Adicionalmente (sin estar listadas arriba) la capa de persistencia implementa varias funciones y comportamientos para sincronización de la "biblioteca de usuario" y manejo avanzado de elementos SVG:
+
+- syncSvgsWithBackend(): Promise<void> — Sincroniza la tabla `svg_elements` con el backend usando las siguientes reglas:
+  - Descarga todas las filas del servidor (`GET /api/svgs`).
+  - Inserta en local cualquier fila que exista en el servidor pero no localmente.
+  - Si un elemento existe en ambos lados y la marca `updated_at` del servidor es más reciente, actualiza el registro local.
+  - Antes de sincronizar, resetea la bandera `synchronized` en todos los registros locales y marca como `synchronized: true` los que vienen del servidor o que se suben correctamente.
+  - Para elementos locales que no están en el servidor y que tienen `local === false`, intenta subirlos (`POST /api/svgs`). Si el POST es exitoso, marca `synchronized: true`.
+  - Emite un evento `svg-elements-updated` en `window` para que la UI recargue la paleta si es necesario.
+
+- uploadUserLibrary(username?): Promise<boolean> — Empaqueta la biblioteca local completa (todos los `svg_elements`) y la envía al endpoint `PUT /api/user-library/:username` con un payload { username, updated_at, data: { version, elements } }.
+  - Si la subida es exitosa, el servidor puede devolver `updated_at` que se guarda localmente.
+
+- downloadUserLibrary(username?): Promise<{data, updated_at} | null> — Descarga el "blob" de la biblioteca del servidor `GET /api/user-library/:username`. Devuelve `{ data, updated_at }` o `null` si no existe/ocurre error.
+
+- reconcileUserLibrary(username?): Promise<void> — Función de reconciliación por usuario que compara timestamps y aplica la política siguiente:
+  - Usa una marca por-usuario guardada en localStorage con clave `drawpak:user_library_updated_at:<username>` (funciones auxiliares: `getLocalLibraryUpdatedAt` / `setLocalLibraryUpdatedAt`).
+  - Si no existe biblioteca en servidor y hay timestamp local, intenta subir la biblioteca local al servidor (`uploadUserLibrary`).
+  - Si ambos existen y sus `updated_at` son idénticos, no hace nada.
+  - Si el local es más reciente (local updated_at > server updated_at), empuja la biblioteca local al servidor (`uploadUserLibrary`).
+  - Si el servidor es más reciente (o no hay timestamp local), reemplaza la librería local con los elementos del servidor usando `replaceLocalLibraryWith(elements, serverUpdatedAt, username)`.
+  - `replaceLocalLibraryWith` normaliza cada `SvgElement`, borra la tabla local y vuelve a insertar los elementos del servidor marcándolos como `synchronized: true` y actualiza la marca localStorage con `serverUpdatedAt`.
+
+- getLocalLibraryUpdatedAt(username?) / setLocalLibraryUpdatedAt(username?, ts?) — Lectura/escritura de la marca `updated_at` por usuario en localStorage (clave `drawpak:user_library_updated_at:<user>`). `setLocalLibraryUpdatedAt` guarda la fecha actual si no se le pasa `ts`.
+
+Notas operativas y campos adicionales:
+
+- Los `SvgElement` ahora pueden llevar flags de navegador: `synchronized?: boolean` y `hidden?: boolean` además de los campos tradicionales (`id`, `name`, `category`, `svg`, `handles`, `created_at`, `updated_at`, `local`, `created_by`, `updated_by`).
+- `saveSvgElement` y `updateSvgElement` actualizan la marca local de biblioteca (`setLocalLibraryUpdatedAt()`) y disparan `syncSvgsWithBackend()` (esto hace que los cambios locales intenten sincronizarse con el backend automáticamente cuando proceda).
+- `deleteSvgElement` también lanza `syncSvgsWithBackend()` antes de eliminar el registro local.
+- `initializeBasicElements()` implementa una semilla (seed) protegida por `seedingPromise` para evitar inicializaciones concurrentes. Primero intenta obtener semilla desde `GET /api/svgs`; si falla, utiliza un conjunto embebido de símbolos básicos incluidos en el frontend.
+
+Endpoints esperados por el frontend:
+
+- `GET /api/svgs` — devuelve lista de elementos SVG del servidor (usada por `syncSvgsWithBackend` e `initializeBasicElements`).
+- `POST /api/svgs` — crea un elemento SVG en el servidor (usada para subir elementos locales que deben persistir remotamente).
+- `PUT /api/user-library/:username` — reemplaza/actualiza la biblioteca completa del usuario (usada por `uploadUserLibrary`).
+- `GET /api/user-library/:username` — devuelve la biblioteca completa del usuario con `data` y `updated_at` (usada por `downloadUserLibrary`).
+
+Estos detalles explican la lógica de reconciliación y sincronización implementada en `src/components/database.ts` y cómo la UI y el backend colaboran para mantener la biblioteca de símbolos coherente entre sesiones y dispositivos.
 
 ## 5) Componentes y responsabilidades
 
@@ -398,6 +456,143 @@ Notas:
 ## 10) Contrato breve para IA que interactúe con este repo
 
 - Entrada: archivos TSX/TS y descripción del cambio.
+
+## Esquemas de base de datos
+
+A continuación se incluyen los esquemas relevantes usados por la app (IndexedDB / Dexie) y por el backend SQLite.
+
+### IndexedDB (Dexie) — tablas y campos
+
+- `schemas` (tabla Dexie)
+  - id?: number (auto)
+  - name: string
+  - description?: string
+  - nodes: string (JSON)
+  - edges: string (JSON)
+  - created_at?: string (ISO)
+  - created_by?: string
+  - updated_at?: string (ISO)
+  - updated_by?: string
+  - local?: boolean  // true = local-only, false = intended cloud
+
+- `svg_elements` (tabla Dexie)
+  - id?: number (auto)
+  - name: string
+  - description?: string
+  - category?: string
+  - svg: string (markup)
+  - handles?: string (JSON)
+  - created_at?: string (ISO)
+  - created_by?: string
+  - updated_at?: string (ISO)
+  - updated_by?: string
+  - local?: boolean
+
+Ejemplo de índices usados en `src/components/database.ts`:
+- `schemas` => `++id, name, created_at, updated_at, created_by, updated_by, local`
+- `svg_elements` => `++id, name, category, created_at, updated_at, local`
+
+### SQLite (public/data.sqlite) — tablas y columnas (PHP backend)
+
+SQL DDL usado en `public/index.php`:
+
+CREATE TABLE IF NOT EXISTS schemas (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT,
+  nodes TEXT NOT NULL,
+  edges TEXT NOT NULL,
+  created_at TEXT,
+  created_by TEXT,
+  updated_at TEXT,
+  updated_by TEXT,
+  local INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS svgs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT,
+  category TEXT,
+  svg TEXT NOT NULL,
+  handles TEXT,
+  created_at TEXT,
+  created_by TEXT,
+  updated_at TEXT,
+  updated_by TEXT,
+  local INTEGER DEFAULT 0
+);
+
+Notas:
+- `local` en SQLite se guarda como INTEGER 0/1.
+- El backend espera `username` en los bodies POST/PUT para asignar `created_by`/`updated_by`.
+
+-- Tabla para almacenar blobs de biblioteca por usuario (usada por los endpoints de reconciliación)
+CREATE TABLE IF NOT EXISTS user_libraries (
+  username TEXT PRIMARY KEY,
+  updated_at TEXT,
+  data TEXT
+);
+
+Notas adicionales sobre `user_libraries`:
+- `username` es la clave primaria (string).
+- `updated_at` almacena el timestamp ISO cuando el servidor aceptó/actualizó la biblioteca.
+- `data` contiene el blob JSON de la biblioteca (por ejemplo: { version: 1, elements: [...] }) serializado como TEXT.
+
+Endpoints implementados en `public/index.php` (lista precisa)
+- GET  /api/health
+
+- Schemas
+  - GET    /api/schemas                -> lista todos los esquemas (opciones: q para búsqueda)
+  - GET    /api/schemas/:id            -> obtiene esquema por id
+  - POST   /api/schemas                -> crea esquema (body requiere `username`)
+  - PUT    /api/schemas/:id            -> actualiza campos del esquema (body requiere `username`)
+  - DELETE /api/schemas/:id            -> borra esquema
+
+- SVGs
+  - GET    /api/svgs                   -> lista svgs (opciones: q, category)
+  - GET    /api/svgs/:id               -> obtiene svg por id
+  - POST   /api/svgs                   -> crea svg (acepta `username` opcional o `created_by`)
+  - PUT    /api/svgs/:id               -> actualiza svg (body requiere `username`)
+  - DELETE /api/svgs/:id               -> borra svg
+
+- Per-user library blob
+  - GET    /api/user-library/:username -> devuelve { username, updated_at, data }
+  - PUT    /api/user-library/:username -> crea/actualiza el blob de la biblioteca (upsert)
+
+Estos endpoints cubren las llamadas que hace el frontend en `src/components/database.ts` (p. ej. `GET /api/svgs`, `POST /api/svgs`, `GET|PUT /api/user-library/:username`) y los endpoints CRUD para `schemas` usados por la UI/server.
+
+Endpoints faltantes / sugeridos (opcional)
+- No hay endpoints criticamente "faltantes" respecto a lo que el frontend llama hoy; sin embargo, podrían ser útiles:
+  - PATCH /api/schemas/:id y PATCH /api/svgs/:id — para actualizaciones parciales sin validar `username` en body.
+  - GET /api/user-library (sin username) — listado de bibliotecas disponibles (solo si el servidor quiere compartir bibliotecas públicas).
+  - POST /api/user-library/:username/import — endpoint específico para importar/merge en lugar de reemplazar (si se requiere lógica de merge fina).
+  - Endpoint de autenticación / identidad (por ejemplo /api/me) — hoy el frontend envía `username` en localStorage; una ruta de identidad simplificaría la asignación de `created_by`/`updated_by`.
+
+Si quieres, puedo:
+- Incluir el DDL exacto del `user_libraries` en la sección de esquemas (ya añadido arriba).
+- Actualizar `context.md` con ejemplos de payloads y respuestas para cada endpoint implementado.
+- Añadir tests que comprueben los endpoints usando el servidor PHP embebido.
+
+## Cómo usar el backend local (rápido)
+
+Para desarrollo, desde la raíz del proyecto puedes iniciar el servidor embebido de PHP apuntando al `dist` (o `server`) y usando el router `dist/index.php`:
+
+```fish
+# servir la carpeta dist y usar dist/index.php como router (útil para preview del build)
+php -S 127.0.0.1:8080 -t dist dist/index.php
+```
+
+Endpoints básicos (ejemplos):
+- GET /api/health
+- GET /api/schemas
+- POST /api/schemas  { username, name, description, nodes, edges, local }
+- PUT  /api/schemas/:id { username, ...fields }
+- GET /api/svgs
+- POST /api/svgs { username, name, svg, category, handles, local }
+
+
+
 - Salida esperada: parches aplicables (edits con paths concretos), cambios en package.json si se añaden deps, y tests que pasen.
 - Errores: reportar `bun install`/`bun run dev` fallos y salida de `tsc`.
 

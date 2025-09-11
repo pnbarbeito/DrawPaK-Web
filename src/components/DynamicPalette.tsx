@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTheme } from '@mui/material/styles';
 import {
   Box,
-
-  Typography, Accordion, AccordionSummary, AccordionDetails
+  Typography, Accordion, AccordionSummary, AccordionDetails, IconButton, Tooltip
 } from '@mui/material';
+import { syncSvgsWithBackend } from './database.ts';
 // Replaced ExpandMoreIcon with material symbol span
 import { getSvgElementsByCategory, getSvgCategories } from './database.ts';
 import type { SvgElement } from './database.ts';
@@ -14,6 +15,21 @@ type Props = {
 
 type ElementsByCategory = {
   [category: string]: SvgElement[];
+};
+
+// Small internal component to render status icon on top-right of a card
+const StatusIcon: React.FC<{ element: SvgElement }> = ({ element }) => {
+  const theme = useTheme();
+  // local: boolean | undefined. Treat truthy as 1 (local-only)
+  const isLocal = Boolean(element.local);
+  const isSync = Boolean(element.synchronized);
+  const iconName = isLocal ? 'cloud_off' : (isSync ? 'cloud_done':'cloud_alert');
+  const color = isLocal ? theme.palette.error.main : (isSync ? theme.palette.success.main : theme.palette.warning.main);
+  return (
+    <span style={{ position: 'absolute', right: 6, top: 6, zIndex: 10 }}>
+      <span className="material-symbols-rounded" style={{ color, fontSize: 20 }}>{iconName}</span>
+    </span>
+  );
 };
 
 const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
@@ -51,8 +67,10 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
     for (const category of categories) {
       try {
         const elements = await getSvgElementsByCategory(category);
-        if (elements.length > 0) {
-          elementsByCategory[category] = elements;
+        // Exclude hidden items from normal palette
+        const visible = elements.filter(e => !e.hidden);
+        if (visible.length > 0) {
+          elementsByCategory[category] = visible;
         }
       } catch (error) {
         console.error(`Error cargando elementos de categoría ${category}:`, error);
@@ -119,9 +137,25 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
 
   return (
     <Box sx={{ position: 'absolute', left: 12, top: 72, width: 200, background: 'rgba(0, 0, 0, 0.6)', p: 2, borderRadius: 6, zIndex: 1200, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 96px)' }}>
-      <Typography variant="h6" sx={{ width: '100%', textAlign: 'center', fontSize: 14, fontWeight: 600, mb: 1, color: '#fff' }}>
-        Paleta
-      </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <Typography variant="h6" sx={{ textAlign: 'center', fontSize: 14, fontWeight: 600, color: '#fff' }}>
+          Paleta
+        </Typography>
+        <Tooltip title="Sincronizar con servidor">
+          <IconButton size="small" color='success' onClick={() => { void (async () => {
+            try {
+              await syncSvgsWithBackend();
+              // Notify other parts of the app to reload palette
+              window.dispatchEvent(new Event('svg-elements-updated'));
+          } catch (e) {
+            console.warn('Error sincronizando svgs con backend:', e);
+            window.dispatchEvent(new Event('svg-elements-updated'));
+          }
+        })(); }}>
+          <span className="material-symbols-rounded" style={{ color: 'rgba(32, 255, 2, 1)' }}>cloud_sync</span>
+        </IconButton>
+      </Tooltip>
+      </Box>
       <Box sx={{ mt: 1, flex: 1, minHeight: 0, overflowY: 'auto', pr: 1 }}>
         {Object.keys(elementsByCategory).length === 0 ? (
           <Typography variant="body2" sx={{ fontSize: 12, color: '#fff' }}>
@@ -154,6 +188,7 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
                         draggable
                         onDragStart={(e) => onDragStart(e, getSymbolKeyForElement(element), element)}
                         sx={{
+                          position: 'relative',
                           display: 'flex',
                           alignItems: 'center',
                           gap: 1,
@@ -165,6 +200,8 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
                           color: '#fff'
                         }}
                       >
+                        {/* Status icon in top-right: cloud_done (primary) when local==0, cloud_off (error) when local==1 */}
+                        <StatusIcon element={element} />
                         <Box sx={{
                           width: 48,
                           height: 48,

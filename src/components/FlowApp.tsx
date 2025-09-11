@@ -12,9 +12,10 @@ import ReactFlow, {
 import type { Node, OnConnect, Edge, ReactFlowInstance } from 'reactflow';
 import DynamicPalette from './DynamicPalette';
 import { nodeTypes, defaultEdgeOptions, snapGrid } from './reactFlowConfig.ts';
-import { initDatabase, saveSchema, getAllSchemas, deleteSchema, duplicateSchema, updateSchema, saveSvgElement, getAllSvgElements, deleteSvgElement, getSvgCategories } from './database.ts';
+import { initDatabase, saveSchema, getAllSchemas, deleteSchema, duplicateSchema, updateSchema, saveSvgElement, getAllSvgElements, getSvgCategories, syncSvgsWithBackend, reconcileUserLibrary } from './database.ts';
 import type { Schema, SvgElement } from './database.ts';
 import SvgEditorDialog from './SvgEditorDialog';
+import NotifierRenderer from './Notifier';
 // dynamic imports for large libraries (jsPDF, html-to-image) are loaded only when exporting
 import type { PolygonPoint } from './PolygonNode';
 // No Tauri runtime in web build — all file save actions use browser fallbacks.
@@ -373,7 +374,7 @@ function FlowApp(): React.ReactElement {
   const [schemaName, setSchemaName] = React.useState('');
   const [schemaDescription, setSchemaDescription] = React.useState('');
   const [isTemplate, setIsTemplate] = React.useState(false);
-  const [currentSchemaId, setCurrentSchemaId] = React.useState<number | null>(null); // ID del esquema actual en edición
+  const [currentSchemaId, setCurrentSchemaId] = React.useState<string | null>(null); // ID del esquema actual en edición
   const [currentSchemaName, setCurrentSchemaName] = React.useState<string>(''); // Nombre del esquema actual en edición
   const [schemaLocal, setSchemaLocal] = React.useState<boolean>(false); // false = save to cloud by default
   const [isHandlingNewSchema, setIsHandlingNewSchema] = React.useState(false); // Para prevenir ejecuciones múltiples
@@ -381,9 +382,28 @@ function FlowApp(): React.ReactElement {
 
   // Inicializar la base de datos al cargar la aplicación
   React.useEffect(() => {
-    void initDatabase().catch(error => {
-      console.error('Error inicializando la base de datos:', error);
-    });
+    void (async () => {
+      try {
+        await initDatabase();
+        // Ejecutar sincronización con backend después de inicializar DB en cada recarga
+        try {
+          await syncSvgsWithBackend();
+        } catch (e) {
+          console.warn('syncSvgsWithBackend fallo (no bloqueante):', e);
+        }
+        // Reconcile user library automatically if we have a username configured.
+        const storedUser = localStorage.getItem('dp_username') || localStorage.getItem('username') || null;
+        if (storedUser) {
+          try {
+            await reconcileUserLibrary(storedUser);
+          } catch (e) {
+            console.warn('reconcileUserLibrary failed:', e);
+          }
+        }
+      } catch (error) {
+        console.error('Error inicializando la base de datos:', error);
+      }
+    })();
   }, []);
 
   // cargar elementos svg guardados
@@ -405,6 +425,16 @@ function FlowApp(): React.ReactElement {
       console.error('Error cargando categorías', e);
     }
   }, []);
+
+  // Escuchar eventos externos para recargar SVGs y categorías (por ejemplo después de marcar hidden=true)
+  React.useEffect(() => {
+    const onUpdated = () => {
+      void loadSvgElements();
+      void loadSvgCategories();
+    };
+    window.addEventListener('svg-elements-updated', onUpdated as EventListener);
+    return () => window.removeEventListener('svg-elements-updated', onUpdated as EventListener);
+  }, [loadSvgElements, loadSvgCategories]);
 
   // Usamos el editor interno SvgShapeEditor en lugar de cargar librerías externas
   React.useEffect(() => {
@@ -550,8 +580,8 @@ function FlowApp(): React.ReactElement {
         handles: svgHandles || ''
       };
 
-  const creator = username || localStorage.getItem('dp_username') || 'unknown';
-  await saveSvgElement({ ...elem, created_by: creator, updated_by: creator, local: typeof localFlag === 'boolean' ? localFlag : false });
+      const creator = username || localStorage.getItem('dp_username') || 'unknown';
+      await saveSvgElement({ ...elem, created_by: creator, updated_by: creator, local: typeof localFlag === 'boolean' ? localFlag : false });
       setShowSvgDialog(false);
       setSvgName('');
       setSvgDescription('');
@@ -680,7 +710,7 @@ function FlowApp(): React.ReactElement {
     }
   }, [nodes, edges, setNodes, setEdges]);
 
-  const handleDeleteSchema = useCallback(async (schemaId: number, schemaName: string) => {
+  const handleDeleteSchema = useCallback(async (schemaId: string, schemaName: string) => {
     if (window.confirm(`¿Estás seguro de que quieres eliminar el esquema "${schemaName}"?`)) {
       try {
         await deleteSchema(schemaId);
@@ -692,7 +722,7 @@ function FlowApp(): React.ReactElement {
     }
   }, [loadSchemas]);
 
-  const handleDuplicateSchema = useCallback(async (schemaId: number, originalName: string) => {
+  const handleDuplicateSchema = useCallback(async (schemaId: string, originalName: string) => {
     const newName = prompt(`Ingresa el nombre para la copia de "${originalName}":`, `${originalName} (copia)`);
     if (newName && newName.trim()) {
       try {
@@ -710,7 +740,7 @@ function FlowApp(): React.ReactElement {
   const CURRENT_SCHEMA_KEY = 'drawpak-current-schema-id';
 
   // Funciones de persistencia
-  const saveToLocalStorage = useCallback((currentNodes: Node<ElectNodeData>[], currentEdges: Edge<ElectEdgeData>[], schemaId: number | null = null, schemaName: string = '') => {
+  const saveToLocalStorage = useCallback((currentNodes: Node<ElectNodeData>[], currentEdges: Edge<ElectEdgeData>[], schemaId: string | null = null, schemaName: string = '') => {
     try {
       // Attempt to measure current canvas size from wrapper if available
       let canvasWidth: number | null = null;
@@ -762,7 +792,7 @@ function FlowApp(): React.ReactElement {
 
         // Establecer el ID del esquema actual si existe
         if (savedSchemaId) {
-          setCurrentSchemaId(Number(savedSchemaId));
+          setCurrentSchemaId(savedSchemaId);
         } else if (schemaData.currentSchemaId) {
           setCurrentSchemaId(schemaData.currentSchemaId);
         }
@@ -778,7 +808,7 @@ function FlowApp(): React.ReactElement {
         return {
           nodes: schemaData.nodes || [],
           edges: schemaData.edges || [],
-          currentSchemaId: Number(savedSchemaId) || schemaData.currentSchemaId || null,
+          currentSchemaId: savedSchemaId || schemaData.currentSchemaId || null,
           currentSchemaName: schemaData.currentSchemaName || '',
           currentSchemaDescription: schemaData.currentSchemaDescription || '',
           canvasWidth: typeof schemaData.canvasWidth === 'number' ? schemaData.canvasWidth : null,
@@ -2013,8 +2043,8 @@ function FlowApp(): React.ReactElement {
               top: 80,
               left: '50%',
               transform: 'translateX(-50%)',
-              background: 'rgba(33, 150, 243, 0.9)',
-              color: 'white',
+              background: 'rgba(33, 150, 243, 0.2)',
+              color: 'black',
               p: 2,
               borderRadius: 1,
               textAlign: 'center',
@@ -2479,7 +2509,7 @@ function FlowApp(): React.ReactElement {
 
       {/* Diálogo para pedir nombre de usuario (requerido) */}
       <Dialog open={showUsernameDialog} onClose={handleUsernameCancel} maxWidth="xs">
-        <DialogTitle>Nombre de usuario requerido</DialogTitle>
+        <DialogTitle sx={{textAlign: 'center'}}>Nombre de usuario requerido</DialogTitle>
         <DialogContent>
           <Typography sx={{ mb: 1 }}>Introduce un nombre de usuario alfanumérico (mínimo 6 caracteres).</Typography>
           <TextField
@@ -2489,12 +2519,11 @@ function FlowApp(): React.ReactElement {
             fullWidth
             variant="outlined"
             value={usernameInput}
-            onChange={(e) => setUsernameInput(e.target.value)}
+            onChange={(e) => setUsernameInput(e.target.value.toLowerCase().trim())}
             helperText={usernameInput && !isValidUsername(usernameInput) ? 'Debe ser alfanumérico y al menos 6 caracteres' : ''}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleUsernameCancel}>Cancelar</Button>
           <Button onClick={handleUsernameSave} variant="contained">Aceptar</Button>
         </DialogActions>
       </Dialog>
@@ -2651,17 +2680,9 @@ function FlowApp(): React.ReactElement {
           sanitizedSvg={sanitizedSvg}
           svgElements={svgElements}
           onSaveSvgElement={handleSaveSvgElement}
-
-          onDeleteElement={(el) => {
-            void (async () => {
-              if (!el.id) return;
-              try {
-                await deleteSvgElement(el.id); const elems = await getAllSvgElements(); setSvgElements(elems);
-              } catch (e) { console.error(e); }
-            })();
-          }}
         />
       </React.Suspense>
+      <NotifierRenderer />
       <Box sx={{ position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 1200 }}>
         <Typography
           component="a"

@@ -1,6 +1,9 @@
 import React from 'react';
-import { Box, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, FormControlLabel, Checkbox, Typography, Select, MenuItem, FormControl, InputLabel, Slider } from '@mui/material';
+import { Box, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, FormControlLabel, Checkbox, Typography, Select, MenuItem, FormControl, InputLabel, Slider, Tooltip, IconButton } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import SvgShapeEditor from './SvgShapeEditor';
+import { syncSvgsWithBackend, formatTimestamp, updateSvgElement } from './database.ts';
+import { notify } from './notifierBus';
 // Replaced MUI icons with material symbol spans
 type Props = {
   open: boolean;
@@ -23,7 +26,6 @@ type Props = {
   // When saving, caller may accept an optional 'local' flag to control storage
   // local=true means do not store in cloud (store locally only)
   onSaveSvgElement: (local?: boolean) => void | Promise<void>;
-  onDeleteElement: (el: import('./database.ts').SvgElement) => void;
 };
 
 type ImportedHandle = { id: string; x: number; y: number; type?: string };
@@ -39,13 +41,29 @@ const SvgEditorDialog: React.FC<Props> = ({
   open, onClose, svgName, setSvgName, svgDescription, setSvgDescription,
   svgCategory, setSvgCategory, categories,
   svgHandles, setSvgHandles, svgMarkup, setSvgMarkup, useEditor, setUseEditor,
-  sanitizedSvg, svgElements, onSaveSvgElement, onDeleteElement
+  sanitizedSvg, svgElements, onSaveSvgElement
 }) => {
+  // Internal status icon component for cards
+  const StatusIcon: React.FC<{ element: import('./database.ts').SvgElement }> = ({ element }) => {
+    const theme = useTheme();
+    const isLocal = Boolean(element.local);
+    const isSync = Boolean(element.synchronized);
+    const iconName = isLocal ? 'cloud_off' : (isSync ? 'cloud_done' : 'cloud_alert');
+    const color = isLocal ? theme.palette.error.main : (isSync ? theme.palette.success.main : theme.palette.warning.main);
+    return (
+      <span style={{ position: 'absolute', right: 8, top: 8, zIndex: 20 }}>
+        <span className="material-symbols-rounded" style={{ color, fontSize: 25 }}>{iconName}</span>
+      </span>
+    );
+  };
+
   const [editorReloadKey, setEditorReloadKey] = React.useState<number>(Date.now());
   const [dialogDisplayScale, setDialogDisplayScale] = React.useState<number | undefined>(undefined);
   const [categoryFilter, setCategoryFilter] = React.useState<string>('all');
   const [searchQuery, setSearchQuery] = React.useState<string>('');
   const [svgLocal, setSvgLocal] = React.useState<boolean>(false); // false = save to cloud by default
+  const [confirmOpen, setConfirmOpen] = React.useState<boolean>(false);
+  const [toDelete, setToDelete] = React.useState<import('./database.ts').SvgElement | null>(null);
 
   const STORAGE_KEY = 'svgShapeEditor.draft.v1';
 
@@ -381,6 +399,7 @@ const SvgEditorDialog: React.FC<Props> = ({
             <MenuItem value="flowchart">Diagrama de flujo</MenuItem>
             <MenuItem value="network">Red</MenuItem>
             <MenuItem value="uml">UML</MenuItem>
+            <MenuItem value="eliminados">Eliminados</MenuItem>
             {categories.filter(cat => !['custom', 'basic', 'flowchart', 'network', 'uml'].includes(cat)).map(cat => (
               <MenuItem key={cat} value={cat}>{cat}</MenuItem>
             ))}
@@ -395,34 +414,34 @@ const SvgEditorDialog: React.FC<Props> = ({
           {/* Slider for visual display scale: visible only when editor is active */}
           {useEditor && (
             <>
-              <Typography id="input-slider" sx={{mr:2}}>
-                Escala del editor: 
+              <Typography id="input-slider" sx={{ mr: 2 }}>
+                Escala del editor:
               </Typography>
-            <Box sx={{ width: 300 }}>
-              <Slider
-                aria-label="Custom marks"
-                defaultValue={3}
-                getAriaValueText={() => (typeof dialogDisplayScale === 'number' ? dialogDisplayScale.toFixed(1) : '3')}
-                step={0.1}
-                min={0.5}
-                max={6}
-                value={typeof dialogDisplayScale === 'number' ? dialogDisplayScale : 3}
-                onChange={(_, v) => setDialogDisplayScale(typeof v === 'number' ? v : 3)}
-                marks={[
-                  { value: 0.5, label: '0.5x' },
-                  { value: 1, label: '1x' },
-                  { value: 2, label: '2x' },
-                  { value: 3, label: '3x' },
-                  { value: 4, label: '4x' },
-                  { value: 5, label: '5x' },
-                  { value: 6, label: '6x' },
-                ]}
-                valueLabelDisplay="auto"
-              />
-            </Box>
-          </>
-        )}
-      </Box>
+              <Box sx={{ width: 300 }}>
+                <Slider
+                  aria-label="Custom marks"
+                  defaultValue={3}
+                  getAriaValueText={() => (typeof dialogDisplayScale === 'number' ? dialogDisplayScale.toFixed(1) : '3')}
+                  step={0.1}
+                  min={0.5}
+                  max={6}
+                  value={typeof dialogDisplayScale === 'number' ? dialogDisplayScale : 3}
+                  onChange={(_, v) => setDialogDisplayScale(typeof v === 'number' ? v : 3)}
+                  marks={[
+                    { value: 0.5, label: '0.5x' },
+                    { value: 1, label: '1x' },
+                    { value: 2, label: '2x' },
+                    { value: 3, label: '3x' },
+                    { value: 4, label: '4x' },
+                    { value: 5, label: '5x' },
+                    { value: 6, label: '6x' },
+                  ]}
+                  valueLabelDisplay="auto"
+                />
+              </Box>
+            </>
+          )}
+        </Box>
 
         {useEditor ? (
           <>
@@ -492,6 +511,7 @@ const SvgEditorDialog: React.FC<Props> = ({
                   onChange={(e) => setCategoryFilter(String(e.target.value))}
                 >
                   <MenuItem value="all">Todas</MenuItem>
+                  <MenuItem value="eliminados">Eliminados</MenuItem>
                   {categories.map((cat) => (
                     <MenuItem key={cat} value={cat}>{cat}</MenuItem>
                   ))}
@@ -505,15 +525,41 @@ const SvgEditorDialog: React.FC<Props> = ({
                 onChange={(e) => setSearchQuery(e.target.value)}
                 sx={{ minWidth: 240, flex: 1 }}
               />
+              <Tooltip title="Sincronizar con servidor">
+                <IconButton size="small" color='success' onClick={() => {
+                  void (async () => {
+                    try {
+                      await syncSvgsWithBackend();
+                      // Notify other parts of the app to reload palette
+                      window.dispatchEvent(new Event('svg-elements-updated'));
+                    } catch (e) {
+                      console.warn('Error sincronizando svgs con backend:', e);
+                      window.dispatchEvent(new Event('svg-elements-updated'));
+                    }
+                  })();
+                }} title="Sincronizar con servidor">
+                  <span className="material-symbols-rounded" style={{ color: 'rgba(36, 168, 19, 1)' }}>cloud_sync</span>
+                </IconButton>
+              </Tooltip>
             </Box>
 
             {(() => {
               const q = (searchQuery || '').trim().toLowerCase();
               const filtered = svgElements.filter((el) => {
-                if (categoryFilter !== 'all') {
+                // hidden handling: when viewing 'Eliminados' category show only hidden items;
+                // otherwise exclude hidden items from normal listing
+                if (categoryFilter === 'eliminados') {
+                  if (!el.hidden) return false;
+                } else {
+                  if (el.hidden) return false;
+                }
+
+                // category filter: when 'eliminados' is active, ignore category filtering
+                if (categoryFilter !== 'all' && categoryFilter !== 'eliminados') {
                   const cat = (el.category as string) || 'custom';
                   if (cat !== categoryFilter) return false;
                 }
+
                 if (!q) return true;
                 const name = (el.name || '').toLowerCase();
                 const desc = (el.description || '').toLowerCase();
@@ -530,6 +576,7 @@ const SvgEditorDialog: React.FC<Props> = ({
                     <Box
                       key={el.id}
                       sx={{
+                        position: 'relative',
                         width: '100%',
                         border: '1px solid #eee',
                         borderRadius: 2,
@@ -542,16 +589,34 @@ const SvgEditorDialog: React.FC<Props> = ({
                         }
                       }}
                     >
-                    <div style={{ width: '100%', height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid #f0f0f0', padding: 8, boxSizing: 'border-box', background: '#fff' }}>
-                      <div dangerouslySetInnerHTML={{ __html: normalizeSvgForPreview(el.svg || '', 96, 96) }} />
-                    </div>
+                      <StatusIcon element={el} />
+                      <div style={{ width: '100%', height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid #f0f0f0', padding: 8, boxSizing: 'border-box', background: '#fff' }}>
+                        <div dangerouslySetInnerHTML={{ __html: normalizeSvgForPreview(el.svg || '', 96, 96) }} />
+                      </div>
                       <Box sx={{ p: 1 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>{el.name}</Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 600, textAlign: 'center' }}>{el.name}</Typography>
                         <Typography variant="caption" sx={{ color: '#666', display: 'block' }}>{el.description}</Typography>
                         <Typography variant="caption" sx={{ color: '#444', display: 'block', mt: 0.75 }}>Creado por: {el.created_by || 'desconocido'}</Typography>
+                        <Typography variant="caption" sx={{ color: '#444', display: 'block', mt: 0.75 }}>Fecha: {formatTimestamp(el.created_at) || 'desconocido'}</Typography>
                         <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
                           <Button size="small" onClick={() => copyElementToEditor(el)}>Copiar al editor</Button>
-                          <Button size="small" color="error" onClick={() => onDeleteElement(el)}>Eliminar</Button>
+                          {el.hidden ? (
+                            <Button size="small" color="success" onClick={() => {
+                              void (async () => {
+                                if (!el.id) return;
+                                try {
+                                  await updateSvgElement(String(el.id), { hidden: false });
+                                  try { notify({ message: `Elemento "${el.name}" restaurado`, severity: 'success' }); } catch { /* ignore */ }
+                                } catch (err) {
+                                  console.error('Failed to restore svg', el.id, err);
+                                } finally {
+                                  try { window.dispatchEvent(new Event('svg-elements-updated')); } catch { /* ignore */ }
+                                }
+                              })();
+                            }}>Restaurar</Button>
+                          ) : (
+                            <Button size="small" color="error" onClick={() => { setToDelete(el); setConfirmOpen(true); }}>Eliminar</Button>
+                          )}
                         </Box>
                       </Box>
                     </Box>
@@ -562,6 +627,36 @@ const SvgEditorDialog: React.FC<Props> = ({
           </Box>
         </Box>
       </DialogContent>
+      {/* Confirm delete dialog */}
+      <Dialog open={confirmOpen} onClose={() => { setConfirmOpen(false); setToDelete(null); }}>
+        <DialogTitle>Marcar como eliminado</DialogTitle>
+        <DialogContent>
+          <Typography>¿Deseas marcar como eliminado el elemento "{toDelete?.name}"? Esto lo ocultará en la paleta y editor; el servidor no será modificado.</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setConfirmOpen(false); setToDelete(null); }} color="secondary">Cancelar</Button>
+          <Button color="error" onClick={() => {
+            void (async () => {
+              if (!toDelete || !toDelete.id) {
+                setConfirmOpen(false); setToDelete(null); return;
+              }
+              const id = String(toDelete.id);
+              try {
+                // Mark hidden=true locally. This is a browser-only flag; server is unchanged.
+                try {
+                  await updateSvgElement(id, { hidden: true });
+                  try { notify({ message: `Elemento "${toDelete?.name}" marcado como eliminado`, severity: 'error' }); } catch { /* ignore */ }
+                } catch (err) {
+                  console.error('Failed to mark svg hidden', id, err);
+                }
+              } finally {
+                try { window.dispatchEvent(new Event('svg-elements-updated')); } catch { /* ignore */ }
+                setConfirmOpen(false); setToDelete(null);
+              }
+            })();
+          }} startIcon={<span className="material-symbols-rounded">delete</span>}>Eliminar</Button>
+        </DialogActions>
+      </Dialog>
       <DialogActions>
         <FormControlLabel
           control={<Checkbox checked={svgLocal} onChange={(e) => setSvgLocal(e.target.checked)} />}

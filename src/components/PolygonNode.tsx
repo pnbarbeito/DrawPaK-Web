@@ -1,5 +1,4 @@
 import React from 'react';
-import { Handle, Position } from 'reactflow';
 
 export type PolygonPoint = { x: number; y: number };
 
@@ -19,10 +18,10 @@ type PolygonNodeProps = {
 const PolygonNode: React.FC<PolygonNodeProps> = ({ data, selected }) => {
   const {
     points = [],
-    strokeColor = '#2196F3',
+    strokeColor = points.length > 2 ? '#2196F3' : '#000000',
     strokeWidth = 2,
     strokeDasharray = '5,5',
-    fillColor = '#2196F3',
+    fillColor = points.length > 2 ? '#2196F3' : '#000000',
     fillOpacity = 0.1
   } = data;
 
@@ -108,18 +107,6 @@ const PolygonNode: React.FC<PolygonNodeProps> = ({ data, selected }) => {
           />
         ))}
       </svg>
-
-      {/* Handles invisibles para conexiones si es necesario */}
-      <Handle
-        type="source"
-        position={Position.Top}
-        style={{ opacity: 0 }}
-      />
-      <Handle
-        type="target"
-        position={Position.Bottom}
-        style={{ opacity: 0 }}
-      />
     </div>
   );
 };
