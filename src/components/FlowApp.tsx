@@ -2698,7 +2698,7 @@ function FlowApp(): React.ReactElement {
       {/* Diálogo de confirmación para nuevo esquema */}
       <Dialog open={showNewSchemaConfirm} onClose={cancelNewSchema} maxWidth="sm">
         <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#263238', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>Crear Nuevo Esquema</DialogTitle>
-        <DialogContent sx={{mt: 2}}>
+    <DialogContent sx={{ mt: 2 }}>
           <Typography>
             ¿Estás seguro de que quieres crear un nuevo esquema? Se perderán todos los cambios no guardados.
           </Typography>
@@ -2714,7 +2714,7 @@ function FlowApp(): React.ReactElement {
       {/* Diálogo para pedir nombre de usuario (requerido) */}
       <Dialog open={showUsernameDialog} onClose={handleUsernameCancel} maxWidth="xs">
         <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#263238', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>Nombre de usuario requerido</DialogTitle>
-        <DialogContent sx={{mt: 2}}>
+  <DialogContent sx={{ mt: 2 }}>
           <Typography sx={{ mb: 1 }}>Introduce un nombre de usuario alfanumérico (mínimo 6 caracteres).</Typography>
           <TextField
             autoFocus
@@ -2736,7 +2736,7 @@ function FlowApp(): React.ReactElement {
       {/* Diálogo para guardar esquema */}
       <Dialog open={showSaveDialog} onClose={() => setShowSaveDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#263238', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>Guardar Esquema</DialogTitle>
-        <DialogContent sx={{mt: 2}}>
+  <DialogContent sx={{ mt: 2 }}>
           <TextField
             autoFocus
             margin="dense"

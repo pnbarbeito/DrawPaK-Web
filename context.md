@@ -15,8 +15,32 @@ DrawPaK Web es una aplicación web interactiva para crear diagramas eléctricos 
 - Exportar diagramas a PNG y PDF
 - Editor SVG integrado para crear símbolos personalizados
  
-## Cambios recientes importantes
+- ## Cambios recientes importantes
 
+### Cambios recientes (15 de septiembre de 2025)
+
+- Se añadió `public/logo.svg` como recurso público de la aplicación. El SVG contiene un hexágono con nodos y gradientes y está pensado para usarse en la `Toolbar` y como logo principal.
+- Se ajustó el `viewBox` de `public/logo.svg` a `16 7 68 68` y se añadió `preserveAspectRatio="xMidYMid meet"` para centrar el logo y reducir márgenes vacíos, de forma que el logo ocupe gran parte del lienzo cuadrado.
+- Se insertó el logo en la esquina izquierda del `Toolbar` en `src/components/FlowApp.tsx` usando un `Box` con `component="img"`:
+
+```tsx
+<Box component="img" src="/logo.svg" alt="DrawPaK logo" sx={{ width: 36, height: 36, mr: 1 }} />
+```
+
+- Nota: tras algunos cambios en `FlowApp.tsx` se encontró un error HMR reportado por Vite/SWC alrededor del diálogo "Guardar Esquema" (`Expected '</', got '{'`). Si aparece este error revisa JSX malformado (por ejemplo `sx{{}}` en lugar de `sx={{}}`, o comentarios JSX incompletos) cerca de `DialogContent` o componentes MUI.
+
+- Verificación rápida (Fish):
+
+```fish
+file public/logo.svg
+xdg-open public/logo.svg
+npx svgo public/logo.svg --output=public/logo.svg
+bun run dev
+```
+
+- Si prefieres que optimice el SVG y haga commit con un mensaje claro, lo puedo hacer.
+
+-
 - Separación de color y opacidad en nodos: ahora los datos de nodo usan `fillColor` (string RGB) y `fillOpacity` (number, 0..1). Esto evita pérdida de alpha cuando alpha = 0 y permite que los pickers muestren/transmitan alpha por separado.
 - Polígonos: PADDING unificado a 10px. Los puntos SVG se almacenan en coordenadas absolutas; `PolygonNode` renderiza restando el bounding box menos `PADDING` y la función que finaliza el polígono (`finishPolygon`) posiciona el nodo en `minXY - PADDING` para evitar desplazamientos visuales al seleccionar.
 - Persistencia local (IndexedDB / Dexie): agregados campos `updated_by?: string` y `local?: boolean` tanto en `Schema` como en `SvgElement`. `local` ahora por defecto es `false` (significa: intención de guardar en la nube). Las funciones de guardado/actualización (`saveSchema`, `updateSchema`, `saveSvgElement`, `updateSvgElement`, `duplicateSchema`) establecen `updated_by` y `local` cuando corresponde.
