@@ -395,12 +395,12 @@ const SvgEditorDialog: React.FC<Props> = ({
             label="Categoría"
           >
             <MenuItem value="custom">Personalizado</MenuItem>
-            <MenuItem value="basic">Básico</MenuItem>
-            <MenuItem value="flowchart">Diagrama de flujo</MenuItem>
-            <MenuItem value="network">Red</MenuItem>
-            <MenuItem value="uml">UML</MenuItem>
-            <MenuItem value="eliminados">Eliminados</MenuItem>
-            {categories.filter(cat => !['custom', 'basic', 'flowchart', 'network', 'uml'].includes(cat)).map(cat => (
+            <MenuItem value="mediciones">Mediciones</MenuItem>
+            <MenuItem value="infraestructura">Infraestructura</MenuItem>
+            <MenuItem value="proteccion">Protecciones</MenuItem>
+            <MenuItem value="seguridad">Seguridad</MenuItem>
+            <MenuItem value="transformadores">Transformadores</MenuItem>
+            {categories.filter(cat => !['custom', 'mediciones', 'infraestructura', 'proteccion', 'seguridad', 'transformadores'].includes(cat)).map(cat => (
               <MenuItem key={cat} value={cat}>{cat}</MenuItem>
             ))}
           </Select>

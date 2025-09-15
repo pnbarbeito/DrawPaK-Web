@@ -23,7 +23,7 @@ const StatusIcon: React.FC<{ element: SvgElement }> = ({ element }) => {
   // local: boolean | undefined. Treat truthy as 1 (local-only)
   const isLocal = Boolean(element.local);
   const isSync = Boolean(element.synchronized);
-  const iconName = isLocal ? 'cloud_off' : (isSync ? 'cloud_done':'cloud_alert');
+  const iconName = isLocal ? 'cloud_off' : (isSync ? 'cloud_done' : 'cloud_alert');
   const color = isLocal ? theme.palette.error.main : (isSync ? theme.palette.success.main : theme.palette.warning.main);
   return (
     <span style={{ position: 'absolute', right: 6, top: 6, zIndex: 10 }}>
@@ -81,7 +81,7 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
   };
 
   useEffect(() => {
-  void loadElements();
+    void loadElements();
   }, [loadElements]);
 
   // Listen for external updates (e.g. when user saves a new SVG) and reload palette
@@ -96,11 +96,13 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
       case 'transformadores':
         return 'Transformadores';
       case 'proteccion':
-        return 'Protección';
+        return 'Protecciones';
       case 'infraestructura':
         return 'Infraestructura';
       case 'seguridad':
         return 'Seguridad';
+      case 'mediciones':
+        return 'Mediciones';
       case 'custom':
         return 'Personalizados';
       default:
@@ -142,19 +144,21 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
           Paleta
         </Typography>
         <Tooltip title="Sincronizar con servidor">
-          <IconButton size="small" color='success' onClick={() => { void (async () => {
-            try {
-              await syncSvgsWithBackend();
-              // Notify other parts of the app to reload palette
-              window.dispatchEvent(new Event('svg-elements-updated'));
-          } catch (e) {
-            console.warn('Error sincronizando svgs con backend:', e);
-            window.dispatchEvent(new Event('svg-elements-updated'));
-          }
-        })(); }}>
-          <span className="material-symbols-rounded" style={{ color: 'rgba(32, 255, 2, 1)' }}>cloud_sync</span>
-        </IconButton>
-      </Tooltip>
+          <IconButton size="small" color='success' onClick={() => {
+            void (async () => {
+              try {
+                await syncSvgsWithBackend();
+                // Notify other parts of the app to reload palette
+                window.dispatchEvent(new Event('svg-elements-updated'));
+              } catch (e) {
+                console.warn('Error sincronizando svgs con backend:', e);
+                window.dispatchEvent(new Event('svg-elements-updated'));
+              }
+            })();
+          }}>
+            <span className="material-symbols-rounded" style={{ color: 'rgba(32, 255, 2, 1)' }}>cloud_sync</span>
+          </IconButton>
+        </Tooltip>
       </Box>
       <Box sx={{ mt: 1, flex: 1, minHeight: 0, overflowY: 'auto', pr: 1 }}>
         {Object.keys(elementsByCategory).length === 0 ? (
