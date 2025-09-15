@@ -11,6 +11,9 @@ export interface Schema {
   updated_by?: string;
   updated_at?: string;
   local?: boolean; // true = only stored in browser DB
+  // browser-only flags
+  synchronized?: boolean;
+  hidden?: boolean;
 }
 
 export interface SvgElement {
@@ -47,7 +50,8 @@ class DrawPakDB extends Dexie {
 
     // New version uses string UUID primary keys (id)
     this.version(2).stores({
-      schemas: 'id,name,updated_at,local',
+      // Add synchronized and hidden to schemas index so local and remote columns align
+      schemas: 'id,name,updated_at,local,synchronized,hidden',
       svg_elements: 'id,name,category,updated_at,local,synchronized,hidden'
     }).upgrade(async (tx) => {
       // Migrate any numeric or missing ids to UUID strings
@@ -55,7 +59,7 @@ class DrawPakDB extends Dexie {
         const sTable = tx.table('schemas') as Dexie.Table<Schema, string>;
         const eTable = tx.table('svg_elements') as Dexie.Table<SvgElement, string>;
         const schemas = await sTable.toArray();
-        for (const s of schemas) {
+  for (const s of schemas) {
           if (!s.id || typeof s.id === 'number') {
             const rnd = (typeof crypto !== 'undefined' ? (crypto as unknown as { randomUUID?: () => string }).randomUUID : undefined);
             const newId = typeof rnd === 'function' ? rnd() : 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2);
@@ -71,11 +75,19 @@ class DrawPakDB extends Dexie {
             const newId = typeof rnd === 'function' ? rnd() : 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2);
             e.id = newId;
           }
-          // ensure new browser-only fields exist with defaults
+          // ensure new browser-only fields exist with defaults for svgs
           if (typeof e.synchronized !== 'boolean') e.synchronized = false;
           if (typeof e.hidden !== 'boolean') e.hidden = false;
           await eTable.put(e);
-  }
+        }
+        // ensure schemas rows also have the new browser-only fields
+        for (const sRow of schemas) {
+          const typed = sRow as Partial<Schema>;
+          let changed = false;
+          if (typeof typed.synchronized !== 'boolean') { typed.synchronized = false; changed = true; }
+          if (typeof typed.hidden !== 'boolean') { typed.hidden = false; changed = true; }
+          if (changed) await sTable.put(typed as Schema);
+        }
       } catch (err) {
         console.warn('Dexie upgrade migration to UUID ids failed:', err);
       }
@@ -88,10 +100,56 @@ class DrawPakDB extends Dexie {
 
 const db = new DrawPakDB();
 
+// Simple in-memory inflight fetch cache for per-user library blob requests.
+// Ensures multiple callers in the same tick reuse the same network request
+// (helps prevent duplicate GET /api/user-library/:user on startup).
+const _inflightUserLibraryFetches: Record<string, Promise<{ data: LibraryBlob; updated_at?: string } | null> | undefined> = {};
+
+async function fetchUserLibraryOnce(username?: string | null) {
+  const user = username || getStoredUsername();
+  if (!user) return null;
+  const existing = _inflightUserLibraryFetches[user];
+  if (existing) return existing;
+  const p = (async () => {
+    try {
+      const url = (typeof window !== 'undefined') ? new URL(`/api/user-library/${encodeURIComponent(user)}`, window.location.origin).toString() : `/api/user-library/${encodeURIComponent(user)}`;
+      const resp = await fetch(url);
+      if (resp.status === 404) return null;
+      if (!resp.ok) return null;
+      const json = await resp.json() as { data?: LibraryBlob; updated_at?: string; updatedAt?: string };
+      return { data: json.data || { elements: [] }, updated_at: json.updated_at || json.updatedAt };
+    } catch (err) {
+      console.warn('fetchUserLibraryOnce failed', err);
+      return null;
+    }
+  })();
+  // store and ensure removal after settle so subsequent unrelated calls will refetch
+  _inflightUserLibraryFetches[user] = p;
+  void p.finally(() => { try { delete _inflightUserLibraryFetches[user]; } catch { /* ignore */ } });
+  return p;
+}
+
 // Promise used to ensure only one seeding runs at a time in this page session.
 let seedingPromise: Promise<void> | null = null;
 
 function nowIso() { return new Date().toISOString(); }
+
+// Robust parser for hidden-like values coming from server blobs.
+// Accepts boolean, number (1/0), and string ('1'/'0'/'true'/'false') and
+// returns a boolean. If value is undefined/null, returns undefined so callers
+// can decide whether to apply a default.
+function parseHidden(v: unknown): boolean | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') return v === 1;
+  if (typeof v === 'string') {
+    const t = v.trim().toLowerCase();
+    if (t === '1' || t === 'true') return true;
+    if (t === '0' || t === 'false') return false;
+    return undefined;
+  }
+  return undefined;
+}
 
 // Local library timestamp key (per username). Stored in localStorage.
 const LOCAL_LIB_KEY_PREFIX = 'drawpak:user_library_updated_at';
@@ -127,37 +185,185 @@ export function setLocalLibraryUpdatedAt(username?: string | null, ts?: string):
   }
 }
 
+// Per-user schemas updated_at key (for coarse-grained reconciliation)
+const LOCAL_SCHEMAS_KEY_PREFIX = 'drawpak:user_schemas_updated_at';
+
+function schemasKeyFor(username?: string | null) {
+  const user = username || getStoredUsername() || 'anon';
+  return `${LOCAL_SCHEMAS_KEY_PREFIX}:${user}`;
+}
+
+export function getLocalSchemasUpdatedAt(username?: string | null): string | null {
+  try {
+    return localStorage.getItem(schemasKeyFor(username));
+  } catch {
+    return null;
+  }
+}
+
+export function setLocalSchemasUpdatedAt(username?: string | null, ts?: string): void {
+  try {
+    const key = schemasKeyFor(username);
+    const val = ts || nowIso();
+    localStorage.setItem(key, val);
+  } catch {
+    // ignore
+  }
+}
+
 // Upload the full library (blob) to the backend for the given username.
 export async function uploadUserLibrary(username?: string | null): Promise<boolean> {
+  // Delegate to unified uploader that handles merging of elements and schemas
+  return await uploadFullUserLibrary(username);
+}
+
+// Merge two library data blobs (preserve both elements and schemas keys). This is intentionally
+// tolerant: if keys are missing, it will default to empty arrays. New data wins for overlapping
+// items by id (using id field) when possible.
+function mergeLibraryData(existing: Record<string, unknown> | null, incoming: Record<string, unknown> | null): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  // version: take max or incoming
+  out.version = incoming && incoming.version ? incoming.version : existing && existing.version ? existing.version : 1;
+
+  // Merge elements (SVGs)
+  const exElements = Array.isArray(existing?.['elements']) ? existing['elements'] as unknown[] : [];
+  const inElements = Array.isArray(incoming?.['elements']) ? incoming['elements'] as unknown[] : [];
+  if (exElements.length === 0 && inElements.length > 0) out.elements = inElements;
+  else if (inElements.length === 0 && exElements.length > 0) out.elements = exElements;
+  else {
+    // Merge by id: shallow-merge incoming into existing (incoming overrides present keys)
+    const map = new Map<string, Record<string, unknown>>();
+    for (const e of exElements) {
+      if (e && typeof e === 'object' && 'id' in (e as Record<string, unknown>)) map.set(String((e as Record<string, unknown>)['id']), e as Record<string, unknown>);
+    }
+    for (const e of inElements) {
+      if (e && typeof e === 'object' && 'id' in (e as Record<string, unknown>)) {
+        const id = String((e as Record<string, unknown>)['id']);
+        const existingObj = map.get(id) || {};
+  map.set(id, { ...existingObj, ... (e as Record<string, unknown>) });
+      }
+    }
+    out['elements'] = Array.from(map.values());
+  }
+
+  // Merge schemas
+  const exSchemas = Array.isArray(existing?.['schemas']) ? existing['schemas'] as unknown[] : [];
+  const inSchemas = Array.isArray(incoming?.['schemas']) ? incoming['schemas'] as unknown[] : [];
+  if (exSchemas.length === 0 && inSchemas.length > 0) out.schemas = inSchemas;
+  else if (inSchemas.length === 0 && exSchemas.length > 0) out.schemas = exSchemas;
+  else {
+    const map = new Map<string, Record<string, unknown>>();
+    for (const s of exSchemas) {
+      if (s && typeof s === 'object' && 'id' in (s as Record<string, unknown>)) map.set(String((s as Record<string, unknown>)['id']), s as Record<string, unknown>);
+    }
+    for (const s of inSchemas) {
+      if (s && typeof s === 'object' && 'id' in (s as Record<string, unknown>)) {
+        const id = String((s as Record<string, unknown>)['id']);
+        const existingObj = map.get(id) || {};
+  map.set(id, { ...existingObj, ... (s as Record<string, unknown>) });
+      }
+    }
+    out['schemas'] = Array.from(map.values());
+  }
+
+  // Preserve other keys present in either side (non-destructive): copy primitives/objects that are not arrays
+  const otherKeys = new Set<string>([...Object.keys(existing || {}), ...Object.keys(incoming || {})]);
+  for (const k of otherKeys) {
+    if (k === 'elements' || k === 'schemas' || k === 'version') continue;
+    const inc = incoming;
+    const ex = existing;
+    if (inc && inc[k] !== undefined) out[k] = inc[k];
+    else if (ex && ex[k] !== undefined) out[k] = ex[k];
+    else out[k] = undefined;
+  }
+
+  return out;
+}
+
+// Unified uploader: uploads both elements and schemas in a single merged blob so callers
+// don't accidentally overwrite unrelated keys on the server.
+export async function uploadFullUserLibrary(username?: string | null): Promise<boolean> {
   const user = username || getStoredUsername();
   if (!user) return false;
   await initDatabase();
+
   const elements = await getAllSvgElements();
+  const schemas = await getAllSchemas();
+
+  const sanitizedElements = elements.map(sanitizeSvgForServer);
+  const sanitizedSchemas = schemas.map(sanitizeSchemaForServer);
+
   const payload = {
     username: user,
     updated_at: getLocalLibraryUpdatedAt(user) || nowIso(),
-    data: { version: 1, elements }
+    data: { version: 1, elements: sanitizedElements, schemas: sanitizedSchemas }
   };
 
   try {
-    const resp = await fetch(`/api/user-library/${encodeURIComponent(user)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const existing = await downloadUserLibrary(user).catch(() => null);
+    const existingData = existing && existing.data ? (existing.data as Record<string, unknown>) : { version: 1, elements: [] };
+    const merged = mergeLibraryData(existingData, payload.data as Record<string, unknown>);
+
+    const finalPayload = { username: user, updated_at: payload.updated_at, data: merged };
+    const url = (typeof window !== 'undefined') ? new URL(`/api/user-library/${encodeURIComponent(user)}`, window.location.origin).toString() : `/api/user-library/${encodeURIComponent(user)}`;
+    const resp = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(finalPayload) });
     if (!resp.ok) {
-      console.warn('uploadUserLibrary failed:', await resp.text());
+      console.warn('uploadFullUserLibrary failed:', await resp.text().catch(() => '<no-body>'));
       return false;
     }
-    const jsonResp = await resp.json().catch(() => null) as { updated_at?: string } | null;
-    // server may return updated_at
-    if (jsonResp && jsonResp.updated_at) setLocalLibraryUpdatedAt(user, String(jsonResp.updated_at));
-    else setLocalLibraryUpdatedAt(user);
+    const json = await resp.json().catch(() => null) as { updated_at?: string } | null;
+    if (json && json.updated_at) {
+      setLocalLibraryUpdatedAt(user, String(json.updated_at));
+      setLocalSchemasUpdatedAt(user, String(json.updated_at));
+    } else {
+      setLocalLibraryUpdatedAt(user);
+      setLocalSchemasUpdatedAt(user);
+    }
+    // Mark local rows as synchronized so UI status icons reflect the upload
+    try {
+      await db.transaction('rw', db.svg_elements, db.schemas, async () => {
+        // mark all svg elements as synchronized
+        await db.svg_elements.toCollection().modify((e: Partial<SvgElement>) => { (e as Record<string, unknown>)['synchronized'] = true; });
+        // mark all schemas as synchronized
+        await db.schemas.toCollection().modify((s: Partial<Schema>) => { (s as Record<string, unknown>)['synchronized'] = true; });
+      });
+    } catch (err) {
+      console.warn('Failed to mark local rows as synchronized after upload:', err);
+    }
     return true;
   } catch (err) {
-    console.warn('uploadUserLibrary network error', err);
+    console.warn('uploadFullUserLibrary network error', err);
     return false;
   }
+}
+
+// Debounced uploader: avoid sending multiple full-library uploads in a short burst.
+// Per-user timers ensure independent debounces per account.
+const _debounceTimers: Record<string, number | undefined> = {};
+const UPLOAD_DEBOUNCE_MS = 2000;
+
+export function scheduleUploadFullUserLibrary(username?: string | null): void {
+  const user = username || getStoredUsername();
+  if (!user) return;
+  // clear existing timer
+  try {
+    if (_debounceTimers[user]) {
+      clearTimeout(_debounceTimers[user]);
+    }
+  } catch { /* ignore */ }
+  // schedule
+  _debounceTimers[user] = setTimeout(async () => {
+    try {
+      const ok = await uploadFullUserLibrary(user);
+      if (ok) {
+        try { setLocalLibraryUpdatedAt(user); } catch { /* ignore */ }
+      }
+    } catch (err) {
+      console.warn('Debounced uploadFullUserLibrary failed', err);
+    } finally {
+      try { delete _debounceTimers[user]; } catch { /* ignore */ }
+    }
+  }, UPLOAD_DEBOUNCE_MS) as unknown as number;
 }
 
 interface LibraryBlob {
@@ -169,12 +375,9 @@ interface LibraryBlob {
 export async function downloadUserLibrary(username?: string | null): Promise<{ data: LibraryBlob; updated_at?: string } | null> {
   const user = username || getStoredUsername();
   if (!user) return null;
+  // Use inflight cache to avoid duplicate GETs
   try {
-    const resp = await fetch(`/api/user-library/${encodeURIComponent(user)}`);
-    if (resp.status === 404) return null;
-    if (!resp.ok) return null;
-    const json = await resp.json() as { data?: LibraryBlob; updated_at?: string; updatedAt?: string };
-    return { data: json.data || { elements: [] }, updated_at: json.updated_at || json.updatedAt };
+    return await fetchUserLibraryOnce(user);
   } catch (err) {
     console.warn('downloadUserLibrary failed', err);
     return null;
@@ -201,7 +404,7 @@ async function replaceLocalLibraryWith(elements: SvgElement[], serverUpdatedAt?:
           updated_by: e.updated_by || e.created_by || username || undefined,
           local: typeof e.local === 'boolean' ? e.local : false,
           synchronized: true,
-          hidden: typeof e.hidden === 'boolean' ? e.hidden : false
+          hidden: parseHidden(e.hidden) ?? false
         };
         await db.svg_elements.put(elem);
       }
@@ -256,6 +459,97 @@ export async function reconcileUserLibrary(username?: string | null): Promise<vo
   }
 }
 
+// --- Schema library sync (analogous to svg library functions) ---
+
+interface SchemasBlob {
+  version?: number;
+  schemas?: Schema[];
+}
+
+export async function uploadUserSchemas(username?: string | null): Promise<boolean> {
+  // Delegate to the unified uploader so elements and schemas are uploaded together
+  return await uploadFullUserLibrary(username);
+}
+
+export async function downloadUserSchemas(username?: string | null): Promise<{ data: SchemasBlob; updated_at?: string } | null> {
+  const user = username || getStoredUsername();
+  if (!user) return null;
+  try {
+    const result = await fetchUserLibraryOnce(user);
+    if (!result) return null;
+    const data = result.data as unknown as SchemasBlob | LibraryBlob;
+    return { data: (data as SchemasBlob) || { schemas: [] }, updated_at: result.updated_at };
+  } catch (err) {
+    console.warn('downloadUserSchemas failed', err);
+    return null;
+  }
+}
+
+async function replaceLocalSchemasWith(schemas: Schema[], serverUpdatedAt?: string, username?: string | null) {
+  await initDatabase();
+  try {
+    await db.transaction('rw', db.schemas, async () => {
+      await db.schemas.clear();
+      for (const s of schemas) {
+        const row: Schema = {
+          id: s.id,
+          name: s.name || '',
+          description: s.description || '',
+          nodes: s.nodes || '[]',
+          edges: s.edges || '[]',
+          created_at: s.created_at || nowIso(),
+          created_by: s.created_by || username || undefined,
+          updated_at: s.updated_at || s.created_at || nowIso(),
+          updated_by: s.updated_by || s.created_by || username || undefined,
+          local: typeof s.local === 'boolean' ? s.local : false,
+          synchronized: true,
+          hidden: parseHidden(s.hidden) ?? false
+        };
+        await db.schemas.put(row);
+      }
+    });
+    setLocalSchemasUpdatedAt(username, serverUpdatedAt || nowIso());
+  } catch (err) {
+    console.error('replaceLocalSchemasWith failed', err);
+  }
+}
+
+export async function reconcileUserSchemas(username?: string | null): Promise<void> {
+  const user = username || getStoredUsername();
+  if (!user) return;
+  await initDatabase();
+  const localUpdated = getLocalSchemasUpdatedAt(user);
+  const server = await downloadUserSchemas(user);
+
+  if (!server) {
+    // If local has data, push it
+    if (localUpdated) {
+      await uploadUserSchemas(user);
+    }
+    return;
+  }
+
+  const serverUpdated = server.updated_at || null;
+  const localTs = localUpdated ? Date.parse(localUpdated) : 0;
+  const serverTs = serverUpdated ? Date.parse(serverUpdated) : 0;
+
+  if (localUpdated && serverUpdated && localTs === serverTs) return;
+  if (localUpdated && localTs > serverTs) {
+    await uploadUserSchemas(user);
+    return;
+  }
+
+  // server newer -> replace local
+  try {
+    const payload = server.data;
+    if (!payload) return;
+    const rows = Array.isArray(payload.schemas) ? payload.schemas : (Array.isArray(payload) ? payload : []);
+    await replaceLocalSchemasWith(rows, serverUpdated || undefined, user);
+  } catch (err) {
+    console.warn('reconcileUserSchemas failed to apply server schemas', err);
+  }
+}
+
 
 
 export async function initDatabase(): Promise<boolean> {
@@ -286,7 +580,61 @@ export async function saveSchema(schema: Schema): Promise<string> {
     }
   }
   await db.schemas.put(toSave);
+  // mark schemas updated timestamp for current user
+  try { setLocalSchemasUpdatedAt(); } catch { /* ignore */ }
+  // attempt sync in background (non-blocking)
+  void syncSchemasWithBackend().catch(() => { /* ignore */ });
+  // If we have a configured username, also upload the full user library so server-side user_library is updated
+  try {
+    const user = getStoredUsername();
+    if (user) {
+      try { scheduleUploadFullUserLibrary(user); } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
   return toSave.id;
+}
+
+// Helpers to sanitize objects before sending to the backend
+function sanitizeSchemaForServer(s: Partial<Schema>): Record<string, unknown> {
+  const sRec = s as Partial<Schema> & Record<string, unknown>;
+  const created_by = sRec['created_by'] !== undefined ? String(sRec['created_by']) : undefined;
+  const updated_by = sRec['updated_by'] !== undefined ? String(sRec['updated_by']) : undefined;
+  return {
+    id: s.id,
+    name: s.name || '',
+    description: s.description || '',
+    nodes: s.nodes || '[]',
+    edges: s.edges || '[]',
+    created_at: s.created_at || nowIso(),
+    updated_at: s.updated_at || nowIso(),
+    created_by,
+    updated_by,
+    // Always send local as 0 to server-side SQLite (server rows must not be marked local-only)
+    local: 0,
+    // include hidden flag for user_library blobs
+    hidden: parseHidden(s.hidden) ?? false
+  };
+}
+
+function sanitizeSvgForServer(e: Partial<SvgElement>): Record<string, unknown> {
+  const eRec = e as Partial<SvgElement> & Record<string, unknown>;
+  const created_by = eRec['created_by'] !== undefined ? String(eRec['created_by']) : undefined;
+  const updated_by = eRec['updated_by'] !== undefined ? String(eRec['updated_by']) : undefined;
+  return {
+    id: e.id,
+    name: e.name || '',
+    description: e.description || '',
+    category: e.category || 'custom',
+    svg: e.svg || '',
+    handles: e.handles || '',
+    created_at: e.created_at || nowIso(),
+    updated_at: e.updated_at || nowIso(),
+    created_by,
+    updated_by,
+    local: 0,
+    // include hidden flag for user_library blobs
+    hidden: parseHidden(e.hidden) ?? false
+  };
 }
 
 export async function updateSchema(id: string, schema: Partial<Schema>): Promise<void> {
@@ -295,6 +643,15 @@ export async function updateSchema(id: string, schema: Partial<Schema>): Promise
   if (!cur) throw new Error('Esquema no encontrado');
   const updated: Schema = { ...cur, ...schema, updated_at: nowIso(), updated_by: schema.updated_by || cur.updated_by || cur.created_by, local: typeof schema.local === 'boolean' ? schema.local : cur.local } as Schema;
   await db.schemas.put(updated);
+  try { setLocalSchemasUpdatedAt(); } catch { /* ignore */ }
+  void syncSchemasWithBackend().catch(() => { /* ignore */ });
+  // If we have a username, upload the full user library so server blob reflects schema changes (e.g. hidden)
+  try {
+    const user = getStoredUsername();
+    if (user) {
+      try { scheduleUploadFullUserLibrary(user); } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
 }
 
 export async function getAllSchemas(): Promise<Schema[]> {
@@ -312,6 +669,141 @@ export async function getSchemaById(id: string): Promise<Schema | null> {
 export async function deleteSchema(id: string): Promise<void> {
   await initDatabase();
   await db.schemas.delete(id);
+  try { setLocalSchemasUpdatedAt(); } catch { /* ignore */ }
+  void syncSchemasWithBackend().catch(() => { /* ignore */ });
+}
+
+// Synchronize schemas with backend using rules similar to syncSvgsWithBackend:
+// - fetch server rows (GET /api/schemas)
+// - insert server-only rows locally
+// - update local rows when server updated_at is newer
+// - push local-only rows (local === false) to server via POST /api/schemas
+export async function syncSchemasWithBackend(): Promise<void> {
+  await initDatabase();
+  // prefer stored username if present; do not force a default username
+  const storedUsername = (typeof localStorage !== 'undefined') ? localStorage.getItem('username') : null;
+  // Reset synchronized flags for schemas before syncing (mirror behavior for svgs)
+  try {
+    await db.transaction('rw', db.schemas, async () => {
+      await db.schemas.toCollection().modify((s: Partial<Schema>) => {
+        (s as Record<string, unknown>)['synchronized'] = false;
+      });
+    });
+  } catch (err) {
+    console.warn('Failed to reset synchronized flags for schemas before sync:', err);
+  }
+  let serverRows: Array<Record<string, unknown>> = [];
+  // Attempt to fetch server schemas. Use an absolute URL to avoid base-path issues
+  // and retry once after a short delay in case the backend is not immediately available
+  try {
+    const url = (typeof window !== 'undefined') ? new URL('/api/schemas', window.location.origin).toString() : '/api/schemas';
+    let resp: Response | null = null;
+    try {
+      resp = await fetch(url);
+    } catch (err) {
+      // First attempt failed (network/CORS). Wait briefly and retry once.
+      console.warn('Initial fetch(/api/schemas) failed, retrying in 2s...', err);
+      await new Promise((res) => setTimeout(res, 2000));
+      try {
+        resp = await fetch(url);
+      } catch (err2) {
+        console.warn('Retry fetch(/api/schemas) failed; aborting schemas sync for now', err2);
+        return;
+      }
+    }
+
+    if (!resp || !resp.ok) {
+      // Non-OK response: treat as no server rows but continue to attempt pushing local-only rows below
+      console.warn('fetch(/api/schemas) returned non-ok status:', resp && resp.status);
+      const data = await resp?.json().catch(() => null);
+      serverRows = Array.isArray(data) ? data : [];
+    } else {
+      const data = await resp.json();
+      // If server returns non-array, treat as no server rows. Do NOT abort when [] —
+      // we still want to attempt pushing local-only schemas to an empty server.
+      serverRows = Array.isArray(data) ? data : [];
+    }
+  } catch (err) {
+    console.warn('Unexpected error during fetch(/api/schemas):', err);
+    return;
+  }
+
+  const serverById = new Map<string, Record<string, unknown>>();
+  for (const r of serverRows) {
+    if (r && r.id) serverById.set(String(r.id), r);
+  }
+
+  const local = await db.schemas.toArray();
+  const localById = new Map<string, Schema>();
+  for (const l of local) if (l && l.id) localById.set(String(l.id), l);
+
+  try {
+    await db.transaction('rw', db.schemas, async () => {
+      for (const [id, srv] of serverById.entries()) {
+        const localElem = localById.get(id);
+        const normalized: Schema = {
+          id: String(srv.id),
+          name: srv.name ? String(srv.name) : '',
+          description: srv.description ? String(srv.description) : '',
+          nodes: srv.nodes ? String(srv.nodes) : '[]',
+          edges: srv.edges ? String(srv.edges) : '[]',
+          created_at: srv.created_at ? String(srv.created_at) : nowIso(),
+          created_by: srv.created_by ? String(srv.created_by) : undefined,
+          updated_at: srv.updated_at ? String(srv.updated_at) : nowIso(),
+          updated_by: srv.updated_by ? String(srv.updated_by) : undefined,
+          local: Boolean(srv.local),
+        };
+
+        if (!localElem) {
+          // server-only -> insert locally (mark synchronized)
+          normalized.synchronized = true;
+          await db.schemas.put(normalized);
+        } else {
+          const srvTs = Date.parse(String(srv.updated_at || srv.created_at || '')) || 0;
+          const locTs = Date.parse(String(localElem.updated_at || localElem.created_at || '')) || 0;
+          if (srvTs > locTs) {
+            // server is newer -> update local (mark synchronized)
+            normalized.synchronized = true;
+            await db.schemas.put(normalized);
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.warn('Error applying server->local schemas sync:', err);
+  }
+
+  // Push local-only schemas to server
+  for (const l of local) {
+    try {
+      if (!l.id) continue;
+      if (serverById.has(l.id)) continue;
+      if (l.local === false) {
+        const payload = sanitizeSchemaForServer(l);
+  // Server requires a username field for POST; prefer created_by then stored username
+  if (l.created_by) payload['username'] = l.created_by;
+  else if (storedUsername) payload['username'] = storedUsername;
+
+        try {
+          const resp = await fetch('/api/schemas', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!resp.ok) {
+            console.warn('Failed to push local schema to server', l.id, await resp.text());
+          } else {
+            // mark local row as synchronized on successful push
+            try { await db.schemas.update(l.id, { synchronized: true }); } catch { /* ignore */ }
+          }
+        } catch (err) {
+          console.warn('Network error pushing local schema to server', l.id, err);
+        }
+      }
+    } catch (err) {
+      console.warn('Error handling local schema for push:', err);
+    }
+  }
 }
 
 export async function duplicateSchema(id: string, newName: string): Promise<string> {
@@ -343,7 +835,7 @@ export async function saveSvgElement(elem: SvgElement): Promise<string> {
     updated_at: now,
     local: typeof elem.local === 'boolean' ? elem.local : false,
     synchronized: typeof elem.synchronized === 'boolean' ? elem.synchronized : false,
-    hidden: typeof elem.hidden === 'boolean' ? elem.hidden : false
+    hidden: parseHidden(elem.hidden) ?? false
   };
 
   // Ensure we have a string id (IndexedDB keyPath requires it); generate in frontend if missing
@@ -359,6 +851,13 @@ export async function saveSvgElement(elem: SvgElement): Promise<string> {
   // mark local library as modified
   try { setLocalLibraryUpdatedAt(); } catch { /* ignore */ }
   await syncSvgsWithBackend();
+  // Also attempt to upload the entire user library to server if user is configured so server blob remains current
+  try {
+    const user = getStoredUsername();
+    if (user) {
+      try { scheduleUploadFullUserLibrary(user); } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
   return toSave.id;
 }
 
@@ -366,9 +865,19 @@ export async function updateSvgElement(id: string, elem: Partial<SvgElement>): P
   await initDatabase();
   const cur = await db.svg_elements.get(id);
   if (!cur) throw new Error('SVG element not found');
-  const updated: SvgElement = { ...cur, ...elem, updated_at: nowIso(), updated_by: elem.updated_by || cur.updated_by || cur.created_by, local: typeof elem.local === 'boolean' ? elem.local : cur.local, synchronized: typeof elem.synchronized === 'boolean' ? elem.synchronized : cur.synchronized, hidden: typeof elem.hidden === 'boolean' ? elem.hidden : cur.hidden } as SvgElement;
+  const updated: SvgElement = { ...cur, ...elem, updated_at: nowIso(), updated_by: elem.updated_by || cur.updated_by || cur.created_by, local: typeof elem.local === 'boolean' ? elem.local : cur.local, synchronized: typeof elem.synchronized === 'boolean' ? elem.synchronized : cur.synchronized } as SvgElement;
+  // preserve existing hidden if incoming doesn't specify a hidden-like value
+  const updatedHidden: boolean = parseHidden(elem.hidden) ?? (cur.hidden === true);
+  updated.hidden = updatedHidden;
   await db.svg_elements.put(updated);
   try { setLocalLibraryUpdatedAt(); } catch { /* ignore */ }
+  // Also upload full user library in background when user exists so server blob includes this change
+  try {
+    const user = getStoredUsername();
+    if (user) {
+      try { scheduleUploadFullUserLibrary(user); } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
 }
 
 export async function getAllSvgElements(): Promise<SvgElement[]> {
@@ -408,6 +917,32 @@ export async function clearAllSvgElements(): Promise<void> {
   await db.svg_elements.clear();
 }
 
+// Close the Dexie instance and delete the IndexedDB database
+export async function deleteDatabase(): Promise<void> {
+  try {
+    try {
+      // close Dexie to release handles (Dexie.close is synchronous)
+      db.close();
+    } catch {
+      // ignore
+    }
+    // Delete the DB by name and return a promise that resolves when done
+    await new Promise<void>((resolve) => {
+      try {
+        const req = indexedDB.deleteDatabase('drawpak');
+        req.onsuccess = () => resolve();
+        req.onblocked = () => resolve();
+        req.onerror = () => resolve();
+      } catch {
+        // If indexedDB is not available or deletion failed, resolve anyway
+        resolve();
+      }
+    });
+  } catch {
+    // swallow errors
+  }
+}
+
 
 export async function reinitializeBasicElements(): Promise<void> {
   await clearAllSvgElements();
@@ -444,8 +979,8 @@ export async function syncSvgsWithBackend(): Promise<void> {
     const resp = await fetch('/api/svgs');
     if (!resp.ok) return; // silently ignore failures
     const data = await resp.json();
-    if (!Array.isArray(data) || data.length === 0) return;
-    serverRows = data;
+    // Allow empty array: still need to push local-only svgs to an empty server.
+    serverRows = Array.isArray(data) ? data : [];
   } catch {
     // network/CORS error — nothing to sync
     return;
@@ -519,17 +1054,7 @@ export async function syncSvgsWithBackend(): Promise<void> {
       // only push if local flag is false (meaning it should be persisted on server)
       if (l.local === false) {
         // prepare payload; backend expects username
-        const payload: Record<string, unknown> = {
-          id: l.id,
-          name: l.name || '',
-          description: l.description || '',
-          category: l.category || '',
-          svg: l.svg || '',
-          handles: l.handles || '',
-          created_at: l.created_at || nowIso(),
-          updated_at: l.updated_at || nowIso(),
-          local: l.local ? 1 : 0
-        };
+  const payload = sanitizeSvgForServer(l);
 
         if (l.created_by) payload['created_by'] = l.created_by;
         if (l.updated_by) payload['updated_by'] = l.updated_by;
@@ -579,7 +1104,6 @@ export async function initializeBasicElements(): Promise<void> {
     // Verificar si ya existen elementos básicos (usar conteo directo para evitar reentradas)
     const count = await db.svg_elements.count();
     if (count > 0) {
-      //console.log('Elementos básicos ya están inicializados');
       return;
     }
 
@@ -630,11 +1154,8 @@ export async function initializeBasicElements(): Promise<void> {
         }
       }
     } catch {
-      // Error de red o CORS; continuamos con la semilla local
-      //console.warn('No se pudo recuperar svgs desde backend, usando semilla local', err);
+      // Error de red o CORS; continuar con semilla local
     }
-
-    //console.log('Inicializando elementos básicos desde symbols.data.tsx...');
 
     // Transformadores
     const transformadores = [
@@ -1230,7 +1751,6 @@ export async function initializeBasicElements(): Promise<void> {
             .and(e => (e.category || 'basic') === (element.category || 'basic'))
             .first();
           if (exists) {
-            //console.log(`Elemento ya existe, saltando: ${element.name} (${element.category})`);
             continue;
           }
 
@@ -1250,10 +1770,9 @@ export async function initializeBasicElements(): Promise<void> {
             local: false
           };
           await db.svg_elements.add(elem);
-          //console.log(`Elemento guardado: ${element.name} (${element.category})`);
         }
       });
-      //console.log('Elementos básicos inicializados correctamente');
+  // elementos inicializados correctamente
     } catch (err) {
       console.error('Error inicializando elementos básicos:', err);
     } finally {

@@ -36,7 +36,6 @@ DrawPaK Web es una aplicación web interactiva para crear diagramas eléctricos 
 - **Material-UI 7.3.1** - Componentes UI (@mui/material, @emotion/react, @emotion/styled)
 - **Dexie 4.2.0** - Wrapper para IndexedDB (base de datos local)
 - **@svgdotjs/svg.js 3.2.4** - Manipulación SVG
-- **react-rnd 10.5.2** - Componentes redimensionables y arrastrables
 
 ### Librerías de Utilidad
 - **html-to-image 1.11.13** - Exportación a PNG
@@ -55,7 +54,7 @@ DrawPaK Web es una aplicación web interactiva para crear diagramas eléctricos 
 ```
 /
 ├── public/                 # Archivos estáticos
-│   └── vite.svg           # Favicon
+│   └── logo.svg           # Favicon
 ├── src/                   # Código fuente
 │   ├── main.tsx          # Punto de entrada
 │   ├── App.tsx           # Componente raíz
@@ -270,7 +269,7 @@ Esta es una aplicación robusta y bien estructurada para creación de diagramas 
 - Persistencia client-side: Dexie (IndexedDB)
 - SVG sanitización: dompurify (import dinámico en runtime web)
 - Export: html-to-image (toPng) y jsPDF
-- Otras utilidades: jspdf, html-to-image, react-colorful, react-rnd (instalado), dompurify (dinámico)
+- Otras utilidades: jspdf, html-to-image, react-colorful, dompurify (dinámico)
 
 ## 2) Cómo ejecutar (dev / build)
 
@@ -382,6 +381,16 @@ Adicionalmente (sin estar listadas arriba) la capa de persistencia implementa va
   - `replaceLocalLibraryWith` normaliza cada `SvgElement`, borra la tabla local y vuelve a insertar los elementos del servidor marcándolos como `synchronized: true` y actualiza la marca localStorage con `serverUpdatedAt`.
 
 - getLocalLibraryUpdatedAt(username?) / setLocalLibraryUpdatedAt(username?, ts?) — Lectura/escritura de la marca `updated_at` por usuario en localStorage (clave `drawpak:user_library_updated_at:<user>`). `setLocalLibraryUpdatedAt` guarda la fecha actual si no se le pasa `ts`.
+
+- getLocalSchemasUpdatedAt(username?) / setLocalSchemasUpdatedAt(username?, ts?) — Marca análoga para esquemas por usuario (clave `drawpak:user_schemas_updated_at:<user>`). Estas funciones son usadas por la nueva sincronización de `schemas`.
+
+Sincronización de esquemas (nueva):
+- `syncSchemasWithBackend()` — Implementa reglas similares a `syncSvgsWithBackend` pero para la tabla `schemas`:
+  - `GET /api/schemas` para obtener filas del servidor.
+  - Inserta filas presentes en servidor pero no localmente.
+  - Si existe en ambos lados y `updated_at` del servidor es más reciente, sustituye el registro local.
+  - Para esquemas locales no presentes en el servidor y con `local === false`, hace `POST /api/schemas` para subirlos.
+  - Las funciones `saveSchema`, `updateSchema` y `deleteSchema` actualizan la marca `drawpak:user_schemas_updated_at:<user>` y disparan `syncSchemasWithBackend()` en background para intentar persistir los cambios remotamente.
 
 Notas operativas y campos adicionales:
 

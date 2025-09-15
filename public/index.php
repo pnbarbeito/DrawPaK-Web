@@ -47,7 +47,9 @@ function initDb(PDO $pdo)
     created_by TEXT,
     updated_at TEXT,
     updated_by TEXT,
-    local INTEGER DEFAULT 0
+  local INTEGER DEFAULT 0,
+  synchronized INTEGER DEFAULT 0,
+  hidden INTEGER DEFAULT 0
   )");
 
   $pdo->exec("CREATE TABLE IF NOT EXISTS svgs (
@@ -61,7 +63,9 @@ function initDb(PDO $pdo)
     created_by TEXT,
     updated_at TEXT,
     updated_by TEXT,
-    local INTEGER DEFAULT 0
+  local INTEGER DEFAULT 0,
+  synchronized INTEGER DEFAULT 0,
+  hidden INTEGER DEFAULT 0
   )");
 
   // Per-user library blob storage (stores a JSON object and an updated_at timestamp)
@@ -221,10 +225,13 @@ function initDb(PDO $pdo)
       ]
     ];
 
-    $stmt = $pdo->prepare('INSERT INTO svgs (id, name, description, category, svg, handles, created_at, created_by, updated_at, updated_by, local) VALUES (:id, :name, :description, :category, :svg, :handles, :created_at, :created_by, :updated_at, :updated_by, :local)');
+      $stmt = $pdo->prepare('INSERT INTO svgs (id, name, description, category, svg, handles, created_at, created_by, updated_at, updated_by, local, synchronized, hidden) VALUES (:id, :name, :description, :category, :svg, :handles, :created_at, :created_by, :updated_at, :updated_by, :local, :synchronized, :hidden)');
     $pdo->beginTransaction();
     try {
       foreach ($seed as $s) {
+        // ensure defaults for new columns
+        if (!isset($s['synchronized'])) $s['synchronized'] = 0;
+        if (!isset($s['hidden'])) $s['hidden'] = 0;
         $stmt->execute($s);
       }
       $pdo->commit();
@@ -316,7 +323,7 @@ try {
         // generate a v4-like uuid fallback
         $idToUse = bin2hex(random_bytes(16));
       }
-      $stmt = $db->prepare('INSERT INTO schemas (id, name, description, nodes, edges, created_at, created_by, updated_at, updated_by, local) VALUES (:id, :name, :description, :nodes, :edges, :created_at, :created_by, :updated_at, :updated_by, :local)');
+      $stmt = $db->prepare('INSERT INTO schemas (id, name, description, nodes, edges, created_at, created_by, updated_at, updated_by, local, synchronized, hidden) VALUES (:id, :name, :description, :nodes, :edges, :created_at, :created_by, :updated_at, :updated_by, :local, :synchronized, :hidden)');
       $stmt->execute([
         ':id' => $idToUse,
         ':name' => $body['name'] ?? '',
@@ -327,7 +334,9 @@ try {
         ':created_by' => $username,
         ':updated_at' => $now,
         ':updated_by' => $username,
-        ':local' => isset($body['local']) && $body['local'] ? 1 : 0
+        ':local' => isset($body['local']) && $body['local'] ? 1 : 0,
+        ':synchronized' => isset($body['synchronized']) && $body['synchronized'] ? 1 : 0,
+        ':hidden' => isset($body['hidden']) && $body['hidden'] ? 1 : 0
       ]);
       jsonResponse(['id' => $idToUse], 201);
     }
@@ -359,6 +368,14 @@ try {
       if (isset($body['local'])) {
         $fields[] = 'local = :local';
         $params[':local'] = $body['local'] ? 1 : 0;
+      }
+      if (isset($body['synchronized'])) {
+        $fields[] = 'synchronized = :synchronized';
+        $params[':synchronized'] = $body['synchronized'] ? 1 : 0;
+      }
+      if (isset($body['hidden'])) {
+        $fields[] = 'hidden = :hidden';
+        $params[':hidden'] = $body['hidden'] ? 1 : 0;
       }
       if (count($fields) === 0) jsonResponse(['error' => 'nothing to update'], 400);
       $sql = 'UPDATE schemas SET ' . implode(', ', $fields) . ', updated_at = :updated_at, updated_by = :updated_by WHERE id = :id';
@@ -414,7 +431,7 @@ try {
       if (!$idToUse) {
         $idToUse = bin2hex(random_bytes(16));
       }
-      $stmt = $db->prepare('INSERT INTO svgs (id, name, description, category, svg, handles, created_at, created_by, updated_at, updated_by, local) VALUES (:id, :name, :description, :category, :svg, :handles, :created_at, :created_by, :updated_at, :updated_by, :local)');
+  $stmt = $db->prepare('INSERT INTO svgs (id, name, description, category, svg, handles, created_at, created_by, updated_at, updated_by, local, synchronized, hidden) VALUES (:id, :name, :description, :category, :svg, :handles, :created_at, :created_by, :updated_at, :updated_by, :local, :synchronized, :hidden)');
       $stmt->execute([
         ':id' => $idToUse,
         ':name' => $body['name'] ?? '',
@@ -427,7 +444,9 @@ try {
         ':created_by' => $username,
         ':updated_at' => $now,
         ':updated_by' => $username,
-        ':local' => isset($body['local']) && $body['local'] ? 1 : 0
+  ':local' => isset($body['local']) && $body['local'] ? 1 : 0,
+  ':synchronized' => isset($body['synchronized']) && $body['synchronized'] ? 1 : 0,
+  ':hidden' => isset($body['hidden']) && $body['hidden'] ? 1 : 0
       ]);
       jsonResponse(['id' => $idToUse], 201);
     }
@@ -491,7 +510,8 @@ try {
       $row = $stmt->fetch(PDO::FETCH_ASSOC);
       // If no row exists for this user, return an empty library object (200)
       if (!$row) {
-        jsonResponse(['username' => $username, 'updated_at' => null, 'data' => ['version' => 1, 'elements' => []]]);
+        // Return a canonical empty library object containing both SVG elements and schemas
+        jsonResponse(['username' => $username, 'updated_at' => null, 'data' => ['version' => 1, 'elements' => [], 'schemas' => []]]);
       }
       // return parsed JSON in data if possible
       $result = ['username' => $row['username'], 'updated_at' => $row['updated_at'], 'data' => null];
@@ -512,10 +532,86 @@ try {
         jsonResponse(['error' => 'username mismatch between path and body'], 400);
       }
       $now = $body['updated_at'] ?? (new DateTime())->format(DateTime::ATOM);
-      $data = isset($body['data']) ? $body['data'] : null;
-      // store as JSON string
-      $jsonData = is_scalar($data) ? json_encode(['value' => $data]) : json_encode($data);
-      // upsert
+      $incomingData = isset($body['data']) ? $body['data'] : [];
+
+      // Fetch existing row (if any) to merge data blobs and check updated_at for optimistic locking
+      $stmtRead = $db->prepare('SELECT data, updated_at FROM user_libraries WHERE username = :username');
+      $stmtRead->execute([':username' => $username]);
+      $existingRow = $stmtRead->fetch(PDO::FETCH_ASSOC);
+      $existingData = null;
+      if ($existingRow && $existingRow['data']) {
+        $decoded = json_decode($existingRow['data'], true);
+        $existingData = ($decoded === null) ? null : $decoded;
+      }
+
+      // Optimistic locking: if client provided updated_at and server has a newer updated_at, reject
+      $clientTs = null;
+      if (isset($body['updated_at'])) {
+        $clientTs = strtotime($body['updated_at']);
+      }
+      if ($existingRow && $existingRow['updated_at']) {
+        $serverTs = strtotime($existingRow['updated_at']);
+        if ($clientTs !== null && $serverTs !== false && $clientTs < $serverTs) {
+          // Client is stale
+          jsonResponse(['error' => 'conflict', 'message' => 'server has newer version', 'server_updated_at' => $existingRow['updated_at']], 409);
+        }
+      }
+
+      // Helper: merge existing and incoming library blobs (preserve elements and schemas)
+      $merge_library_data = function ($existing, $incoming) {
+        $out = [];
+        $out['version'] = $incoming['version'] ?? $existing['version'] ?? 1;
+
+        // Merge elements by id (incoming overrides existing)
+        $exElements = is_array($existing['elements'] ?? null) ? $existing['elements'] : [];
+        $inElements = is_array($incoming['elements'] ?? null) ? $incoming['elements'] : [];
+        $map = [];
+        // shallow-merge by id: incoming keys override existing, but preserve other keys (like hidden) when missing
+        foreach ($exElements as $e) {
+          if (is_array($e) && isset($e['id'])) $map[strval($e['id'])] = $e;
+        }
+        foreach ($inElements as $e) {
+          if (is_array($e) && isset($e['id'])) {
+            $id = strval($e['id']);
+            $existingItem = isset($map[$id]) && is_array($map[$id]) ? $map[$id] : [];
+            $map[$id] = array_merge($existingItem, $e);
+          }
+        }
+        $out['elements'] = array_values($map);
+
+        // Merge schemas by id (incoming overrides existing)
+        $exSchemas = is_array($existing['schemas'] ?? null) ? $existing['schemas'] : [];
+        $inSchemas = is_array($incoming['schemas'] ?? null) ? $incoming['schemas'] : [];
+        $map = [];
+        foreach ($exSchemas as $s) {
+          if (is_array($s) && isset($s['id'])) $map[strval($s['id'])] = $s;
+        }
+        foreach ($inSchemas as $s) {
+          if (is_array($s) && isset($s['id'])) {
+            $id = strval($s['id']);
+            $existingItem = isset($map[$id]) && is_array($map[$id]) ? $map[$id] : [];
+            $map[$id] = array_merge($existingItem, $s);
+          }
+        }
+        $out['schemas'] = array_values($map);
+
+        // Preserve other keys (incoming wins)
+        $keys = array_unique(array_merge(array_keys(is_array($existing) ? $existing : []), array_keys(is_array($incoming) ? $incoming : [])));
+        foreach ($keys as $k) {
+          if (in_array($k, ['elements', 'schemas', 'version'])) continue;
+          if (array_key_exists($k, (array)$incoming)) $out[$k] = $incoming[$k];
+          elseif (array_key_exists($k, (array)$existing)) $out[$k] = $existing[$k];
+        }
+        return $out;
+      };
+
+      $existingDataArr = is_array($existingData) ? $existingData : ['version' => 1, 'elements' => [], 'schemas' => []];
+      $incomingDataArr = is_array($incomingData) ? $incomingData : [];
+      $merged = $merge_library_data($existingDataArr, $incomingDataArr);
+
+      $jsonData = json_encode($merged);
+
+      // upsert merged blob
       $stmt = $db->prepare('INSERT INTO user_libraries (username, updated_at, data) VALUES (:username, :updated_at, :data) ON CONFLICT(username) DO UPDATE SET updated_at = :updated_at, data = :data');
       $stmt->execute([':username' => $username, ':updated_at' => $now, ':data' => $jsonData]);
       jsonResponse(['username' => $username, 'updated_at' => $now]);

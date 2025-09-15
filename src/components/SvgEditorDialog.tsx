@@ -324,7 +324,7 @@ const SvgEditorDialog: React.FC<Props> = ({
       setEditorReloadKey(Date.now());
     } catch (e) {
       console.error('Error copiando elemento al editor', e);
-      alert('Error copiando elemento al editor');
+      try { notify({ message: 'Error copiando elemento al editor', severity: 'error' }); } catch { /* ignore */ }
     }
   };
   // Normalize SVG string for preview/thumbnail: ensure viewBox, remove width/height, set requested display size
@@ -368,7 +368,7 @@ const SvgEditorDialog: React.FC<Props> = ({
       <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#263238', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>
         Crear/Editar Elemento SVG
       </DialogTitle>
-      <DialogContent>
+      <DialogContent sx={{mt: 2}}>
         <TextField
           autoFocus
           margin="dense"
@@ -511,10 +511,10 @@ const SvgEditorDialog: React.FC<Props> = ({
                   onChange={(e) => setCategoryFilter(String(e.target.value))}
                 >
                   <MenuItem value="all">Todas</MenuItem>
-                  <MenuItem value="eliminados">Eliminados</MenuItem>
                   {categories.map((cat) => (
                     <MenuItem key={cat} value={cat}>{cat}</MenuItem>
                   ))}
+                  <MenuItem value="eliminados">Eliminados</MenuItem>
                 </Select>
               </FormControl>
 
@@ -629,8 +629,8 @@ const SvgEditorDialog: React.FC<Props> = ({
       </DialogContent>
       {/* Confirm delete dialog */}
       <Dialog open={confirmOpen} onClose={() => { setConfirmOpen(false); setToDelete(null); }}>
-        <DialogTitle>Marcar como eliminado</DialogTitle>
-        <DialogContent>
+        <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#263238', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>Marcar como eliminado</DialogTitle>
+        <DialogContent sx={{mt: 2}}>
           <Typography>¿Deseas marcar como eliminado el elemento "{toDelete?.name}"? Esto lo ocultará en la paleta y editor; el servidor no será modificado.</Typography>
         </DialogContent>
         <DialogActions>

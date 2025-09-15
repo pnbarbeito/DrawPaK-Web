@@ -12,14 +12,17 @@ import ReactFlow, {
 import type { Node, OnConnect, Edge, ReactFlowInstance } from 'reactflow';
 import DynamicPalette from './DynamicPalette';
 import { nodeTypes, defaultEdgeOptions, snapGrid } from './reactFlowConfig.ts';
-import { initDatabase, saveSchema, getAllSchemas, deleteSchema, duplicateSchema, updateSchema, saveSvgElement, getAllSvgElements, getSvgCategories, syncSvgsWithBackend, reconcileUserLibrary } from './database.ts';
+import { initDatabase, saveSchema, getAllSchemas, duplicateSchema, updateSchema, saveSvgElement, getAllSvgElements, getSvgCategories, syncSvgsWithBackend, syncSchemasWithBackend, reconcileUserLibrary, reconcileUserSchemas, clearAllSvgElements, deleteDatabase } from './database.ts';
+import { useNotifier } from './useNotifier';
 import type { Schema, SvgElement } from './database.ts';
 import SvgEditorDialog from './SvgEditorDialog';
 import NotifierRenderer from './Notifier';
 // dynamic imports for large libraries (jsPDF, html-to-image) are loaded only when exporting
 import type { PolygonPoint } from './PolygonNode';
 // No Tauri runtime in web build — all file save actions use browser fallbacks.
-import { Box, AppBar, Toolbar, IconButton, Typography, Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, List, ListItem, ListItemText, FormControlLabel, Checkbox } from '@mui/material';
+import { Box, AppBar, Toolbar, IconButton, Typography, Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, List, ListItem, ListItemText, FormControlLabel, Checkbox, FormControl, InputLabel, Select, MenuItem } from '@mui/material';
+import type { SelectChangeEvent } from '@mui/material/Select';
+import { useTheme } from '@mui/material/styles';
 import Popover from '@mui/material/Popover';
 import { RgbaColorPicker } from 'react-colorful';
 
@@ -127,6 +130,7 @@ function FlowApp(): React.ReactElement {
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<ElectNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<ElectEdgeData>([]);
+  const notifier = useNotifier();
 
   // Ensure label nodes are always rendered on top by placing them at the end
   React.useEffect(() => {
@@ -169,12 +173,30 @@ function FlowApp(): React.ReactElement {
     return true;
   }, [isValidUsername, username]);
 
-  const handleUsernameSave = React.useCallback(() => {
+  const handleUsernameSave = React.useCallback(async () => {
     if (!isValidUsername(usernameInput)) return;
-    localStorage.setItem('dp_username', usernameInput);
-    setUsername(usernameInput);
-    setShowUsernameDialog(false);
+    try {
+      localStorage.setItem('dp_username', usernameInput);
+      setUsername(usernameInput);
+      setShowUsernameDialog(false);
+      // Try to reconcile immediately for this username so local DB reflects server
+      try {
+        await reconcileUserLibrary(usernameInput);
+      } catch (err) {
+        console.warn('reconcileUserLibrary failed on username save:', err);
+      }
+      try {
+        await reconcileUserSchemas(usernameInput);
+      } catch (err) {
+        console.warn('reconcileUserSchemas failed on username save:', err);
+      }
+      // reload the page so the UI picks up the new library state cleanly
+      try { window.location.reload(); } catch { /* ignore */ }
+    } catch (err) {
+      console.error('handleUsernameSave failed', err);
+    }
   }, [usernameInput, isValidUsername]);
+
 
   const handleUsernameCancel = React.useCallback(() => {
     // If no valid username yet, keep dialog open (force); otherwise close
@@ -184,6 +206,47 @@ function FlowApp(): React.ReactElement {
     }
     setShowUsernameDialog(false);
   }, [isValidUsername, username]);
+
+  // Logout: borrar todos los datos locales (IndexedDB + localStorage relevantes) y recargar la app
+  const handleLogout = React.useCallback(async () => {
+    try {
+      // Clear localStorage keys used by the app
+      const keysToRemove = ['dp_username', 'username', 'drawpak-current-schema', 'drawpak-current-schema-id'];
+      try {
+        // remove any user_library updated_at keys
+        for (const k of Object.keys(localStorage)) {
+          if (k.startsWith('drawpak:user_library_updated_at:')) localStorage.removeItem(k);
+        }
+      } catch {
+        // ignore
+      }
+      for (const k of keysToRemove) localStorage.removeItem(k);
+
+      // Clear IndexedDB via provided helpers: clear svg elements and reinitialize DB
+      try {
+        // clearAllSvgElements is exported and will open DB internally
+        await clearAllSvgElements();
+      } catch {
+        console.warn('Failed to clear svg elements during logout');
+      }
+
+      // Also attempt to delete the entire IndexedDB database by name (drawpak)
+      try {
+        await deleteDatabase();
+      } catch {
+        // ignore
+      }
+
+      // Finally, reload the page to reset app state
+      setTimeout(() => {
+        try { window.location.reload(); } catch { /* ignore */ }
+      }, 50);
+    } catch (err) {
+      console.error('Error during logout:', err);
+      try { notifier.notify({ message: 'Error cerrando sesión', severity: 'error' }); } catch { /* ignore */ }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // On mount ensure we prompt for username if missing/invalid
   React.useEffect(() => {
@@ -306,6 +369,7 @@ function FlowApp(): React.ReactElement {
   // Ensure stable references for ReactFlow by memoizing imported configuration
   const stableNodeTypes = React.useMemo(() => nodeTypes, []);
   const stableDefaultEdgeOptions = React.useMemo(() => defaultEdgeOptions, []);
+  const theme = useTheme();
 
   // Effect: when an edge is selected and connects two symbolNode nodes,
   // color it gray; restore original color when unselected or endpoints change.
@@ -371,14 +435,22 @@ function FlowApp(): React.ReactElement {
   const [showSaveDialog, setShowSaveDialog] = React.useState(false);
   const [schemas, setSchemas] = React.useState<Schema[]>([]);
   const [schemaSearch, setSchemaSearch] = React.useState('');
+  const [schemaFilter, setSchemaFilter] = React.useState<'activos' | 'eliminados' | 'todos' | 'locales' | 'propios'>('activos');
   const [schemaName, setSchemaName] = React.useState('');
   const [schemaDescription, setSchemaDescription] = React.useState('');
+  const [schemaLocal, setSchemaLocal] = React.useState(false); // false = save to cloud by default
   const [isTemplate, setIsTemplate] = React.useState(false);
   const [currentSchemaId, setCurrentSchemaId] = React.useState<string | null>(null); // ID del esquema actual en edición
   const [currentSchemaName, setCurrentSchemaName] = React.useState<string>(''); // Nombre del esquema actual en edición
-  const [schemaLocal, setSchemaLocal] = React.useState<boolean>(false); // false = save to cloud by default
+  const [currentSchemaDescription, setCurrentSchemaDescription] = React.useState<string>(''); // Descripción del esquema actual en edición
+  const [currentSchemaLocal, setCurrentSchemaLocal] = React.useState<boolean>(false); // false = save to cloud by default
   const [isHandlingNewSchema, setIsHandlingNewSchema] = React.useState(false); // Para prevenir ejecuciones múltiples
   const [showNewSchemaConfirm, setShowNewSchemaConfirm] = React.useState(false); // Diálogo de confirmación para nuevo esquema
+
+  // Dialog state for schema delete/restore confirmations (replace window.confirm)
+  const [schemaConfirmOpen, setSchemaConfirmOpen] = React.useState<boolean>(false);
+  const [schemaConfirmAction, setSchemaConfirmAction] = React.useState<'delete' | 'restore' | null>(null);
+  const [schemaToAct, setSchemaToAct] = React.useState<{ id: string; name: string } | null>(null);
 
   // Inicializar la base de datos al cargar la aplicación
   React.useEffect(() => {
@@ -391,6 +463,11 @@ function FlowApp(): React.ReactElement {
         } catch (e) {
           console.warn('syncSvgsWithBackend fallo (no bloqueante):', e);
         }
+        try {
+          await syncSchemasWithBackend();
+        } catch (e) {
+          console.warn('syncSchemasWithBackend fallo (no bloqueante):', e);
+        }
         // Reconcile user library automatically if we have a username configured.
         const storedUser = localStorage.getItem('dp_username') || localStorage.getItem('username') || null;
         if (storedUser) {
@@ -398,6 +475,11 @@ function FlowApp(): React.ReactElement {
             await reconcileUserLibrary(storedUser);
           } catch (e) {
             console.warn('reconcileUserLibrary failed:', e);
+          }
+          try {
+            await reconcileUserSchemas(storedUser);
+          } catch (e) {
+            console.warn('reconcileUserSchemas failed:', e);
           }
         }
       } catch (error) {
@@ -454,6 +536,24 @@ function FlowApp(): React.ReactElement {
     }
   }, []);
 
+  const handleManualSyncSchemas = useCallback(async () => {
+    try {
+      const user = localStorage.getItem('dp_username') || localStorage.getItem('username') || null;
+      if (!user) {
+        try { notifier.notify({ message: 'Configura un nombre de usuario antes de sincronizar.', severity: 'warning' }); } catch { /* ignore */ }
+        return;
+      }
+      await reconcileUserSchemas(user);
+      await loadSchemas();
+      try { notifier.notify({ message: 'Sincronización de esquemas completada', severity: 'success' }); } catch { /* ignore */ }
+    } catch (err) {
+      console.error('Error sincronizando esquemas manualmente:', err);
+      try { notifier.notify({ message: 'Error al sincronizar esquemas', severity: 'error' }); } catch { /* ignore */ }
+    }
+  }, [loadSchemas, notifier]);
+
+
+
   const handleSaveSchema = useCallback(async () => {
     try {
       // Si hay un esquema actual en edición, actualizarlo directamente
@@ -469,6 +569,8 @@ function FlowApp(): React.ReactElement {
 
         // Actualizar localStorage y estado local
         setCurrentSchemaName(schemaName);
+        setCurrentSchemaDescription(schemaDescription);
+        setCurrentSchemaLocal(schemaLocal);
         saveToLocalStorage(nodes, edges, currentSchemaId, schemaName);
 
         await loadSchemas();
@@ -478,7 +580,7 @@ function FlowApp(): React.ReactElement {
 
       // Si no hay esquema actual, pedir nombre para crear uno nuevo
       if (!schemaName.trim()) {
-        alert('Por favor ingresa un nombre para el esquema');
+        try { notifier.notify({ message: 'Por favor ingresa un nombre para el esquema', severity: 'warning' }); } catch { /* ignore */ }
         return;
       }
 
@@ -495,7 +597,10 @@ function FlowApp(): React.ReactElement {
 
       // Establecer el nuevo esquema como actual
       setCurrentSchemaId(newSchemaId);
-
+      setSchemaName('');
+      setCurrentSchemaName(schemaName);
+      setCurrentSchemaDescription(schemaDescription);
+      setCurrentSchemaLocal(schemaLocal);
       // Actualizar localStorage con el nuevo ID
       saveToLocalStorage(nodes, edges, newSchemaId, schemaName);
 
@@ -506,16 +611,16 @@ function FlowApp(): React.ReactElement {
       await loadSchemas();
     } catch (error) {
       console.error('Error guardando esquema:', error);
-      alert('Error al guardar el esquema');
+      try { notifier.notify({ message: 'Error al guardar el esquema', severity: 'error' }); } catch { /* ignore */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schemaName, schemaDescription, nodes, edges, isTemplate, loadSchemas, currentSchemaId, setCurrentSchemaId]);
+  }, [schemaName, schemaDescription, nodes, edges, isTemplate, loadSchemas, currentSchemaId, setCurrentSchemaId, schemaLocal, username, notifier]);
 
   // Guardar elemento SVG en DB
   const handleSaveSvgElement = useCallback(async (localFlag?: boolean) => {
     try {
       if (!svgName.trim()) {
-        alert('Ingresa un nombre para el elemento SVG');
+        try { notifier.notify({ message: 'Ingresa un nombre para el elemento SVG', severity: 'warning' }); } catch { /* ignore */ }
         return;
       }
 
@@ -591,29 +696,33 @@ function FlowApp(): React.ReactElement {
       await loadSvgElements();
     } catch (e) {
       console.error('Error guardando svg element', e);
-      alert('Error guardando elemento SVG');
+      try { notifier.notify({ message: 'Error guardando elemento SVG', severity: 'error' }); } catch { /* ignore */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [svgName, svgDescription, svgMarkup, svgHandles, loadSvgElements]);
+  }, [svgName, svgDescription, svgMarkup, svgHandles, loadSvgElements, notifier]);
 
   // Función para manejar el clic del botón guardar
   const handleSaveButtonClick = useCallback(() => {
-    console.log('handleSaveButtonClick called, currentSchemaId:', currentSchemaId);
-
     // Si hay un esquema actual, pre-llenar los campos con los datos actuales
     if (currentSchemaId) {
-      console.log('Opening save dialog for existing schema');
-      setSchemaName(currentSchemaName || '');
-      // keep existing schemaDescription (do not clear it here)
+      // find current schema in loaded schemas to populate fields
+      const found = schemas.find(s => s.id === currentSchemaId);
+      if (found) {
+        setSchemaName(found.name || currentSchemaName || '');
+        setSchemaDescription(found.description || '');
+        setSchemaLocal(typeof found.local === 'boolean' ? found.local : false);
+      } else {
+        setSchemaName(currentSchemaName || '');
+      }
     } else {
-      console.log('Opening save dialog for new schema');
+      // Preparar campos para nuevo esquema
       setSchemaName('');
       setSchemaDescription('');
     }
 
     // Siempre abrir el diálogo para permitir editar nombre/descripción
     setShowSaveDialog(true);
-  }, [currentSchemaId, currentSchemaName]);
+  }, [currentSchemaId, currentSchemaName, schemas]);
 
   const handleLoadSchema = useCallback(async (schema: Schema) => {
     try {
@@ -631,8 +740,8 @@ function FlowApp(): React.ReactElement {
       // Establecer el ID del esquema actual para futuras actualizaciones
       setCurrentSchemaId(schema.id || null);
       setCurrentSchemaName(schema.name || '');
-      // populate editable description so the save dialog shows stored description
-      setSchemaDescription(schema.description || '');
+      setCurrentSchemaDescription(schema.description || '');
+      setCurrentSchemaLocal(typeof schema.local === 'boolean' ? schema.local : false);
 
       // Guardar en localStorage con el ID del esquema
       saveToLocalStorage(parsedNodes, parsedEdges, schema.id || null, schema.name);
@@ -648,10 +757,10 @@ function FlowApp(): React.ReactElement {
       id = maxId + 1;
     } catch (error) {
       console.error('Error cargando esquema:', error);
-      alert('Error al cargar el esquema');
+      try { notifier.notify({ message: 'Error al cargar el esquema', severity: 'error' }); } catch { /* ignore */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setNodes, setEdges, setCurrentSchemaId, setCurrentSchemaName]);
+  }, [setNodes, setEdges, setCurrentSchemaId, setCurrentSchemaName, notifier]);
 
   // Función para importar elementos de un esquema al esquema actual
   const handleImportSchema = useCallback(async (schema: Schema) => {
@@ -706,21 +815,75 @@ function FlowApp(): React.ReactElement {
 
     } catch (error) {
       console.error('Error importando esquema:', error);
-      alert('Error al importar el esquema');
+      try { notifier.notify({ message: 'Error al importar el esquema', severity: 'error' }); } catch { /* ignore */ }
     }
-  }, [nodes, edges, setNodes, setEdges]);
+  }, [nodes, edges, setNodes, setEdges, notifier]);
 
-  const handleDeleteSchema = useCallback(async (schemaId: string, schemaName: string) => {
-    if (window.confirm(`¿Estás seguro de que quieres eliminar el esquema "${schemaName}"?`)) {
-      try {
-        await deleteSchema(schemaId);
-        await loadSchemas();
-      } catch (error) {
-        console.error('Error eliminando esquema:', error);
-        alert('Error al eliminar el esquema');
-      }
+  // JSX: schema confirm dialog (replace window.confirm usages)
+  // We'll render it alongside other dialogs; it uses schemaConfirmOpen/schemaToAct/schemaConfirmAction
+  const SchemaConfirmDialog = (
+    <Dialog open={schemaConfirmOpen} onClose={() => { setSchemaConfirmOpen(false); setSchemaToAct(null); setSchemaConfirmAction(null); }}>
+      <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#263238', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>
+        {schemaConfirmAction === 'delete' ? 'Marcar como eliminado' : 'Restaurar esquema'}
+      </DialogTitle>
+      <DialogContent sx={{ mt: 2 }}>
+        <Typography>
+          {schemaConfirmAction === 'delete'
+            ? `¿Deseas marcar como eliminado el esquema "${schemaToAct?.name}"? Esto lo ocultará en la lista y en el editor.`
+            : `¿Deseas restaurar el esquema "${schemaToAct?.name}"?`}
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => { setSchemaConfirmOpen(false); setSchemaToAct(null); setSchemaConfirmAction(null); }} color="secondary">Cancelar</Button>
+        <Button color={schemaConfirmAction === 'delete' ? 'error' : 'success'} onClick={() => { void performSchemaConfirm(); }}>
+          {schemaConfirmAction === 'delete' ? 'Eliminar' : 'Restaurar'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+
+  const handleDeleteSchema = useCallback((schemaId: string, schemaName: string) => {
+    // Open controlled confirmation dialog instead of window.confirm
+    setSchemaToAct({ id: schemaId, name: schemaName });
+    setSchemaConfirmAction('delete');
+    setSchemaConfirmOpen(true);
+  }, []);
+
+  const handleRestoreSchema = useCallback((schemaId: string, schemaName: string) => {
+    // Open controlled confirmation dialog instead of window.confirm
+    setSchemaToAct({ id: schemaId, name: schemaName });
+    setSchemaConfirmAction('restore');
+    setSchemaConfirmOpen(true);
+  }, []);
+
+  // Perform the confirmed action (delete/restore) for schemas
+  const performSchemaConfirm = useCallback(async () => {
+    if (!schemaToAct || !schemaConfirmAction) {
+      setSchemaConfirmOpen(false);
+      setSchemaToAct(null);
+      setSchemaConfirmAction(null);
+      return;
     }
-  }, [loadSchemas]);
+
+    try {
+      const updater = username || localStorage.getItem('dp_username') || 'unknown';
+      if (schemaConfirmAction === 'delete') {
+        await updateSchema(schemaToAct.id, { hidden: true, updated_by: updater });
+        try { notifier.notify({ message: `Esquema "${schemaToAct.name}" marcado como eliminado`, severity: 'error' }); } catch { /* ignore */ }
+      } else {
+        await updateSchema(schemaToAct.id, { hidden: false, updated_by: updater });
+        try { notifier.notify({ message: `Esquema "${schemaToAct.name}" restaurado`, severity: 'success' }); } catch { /* ignore */ }
+      }
+      await loadSchemas();
+    } catch (error) {
+      console.error('Error realizando la acción sobre el esquema:', error);
+      try { notifier.notify({ message: 'Error procesando la acción sobre el esquema', severity: 'error' }); } catch { /* ignore */ }
+    } finally {
+      setSchemaConfirmOpen(false);
+      setSchemaToAct(null);
+      setSchemaConfirmAction(null);
+    }
+  }, [schemaConfirmAction, schemaToAct, username, loadSchemas, notifier]);
 
   const handleDuplicateSchema = useCallback(async (schemaId: string, originalName: string) => {
     const newName = prompt(`Ingresa el nombre para la copia de "${originalName}":`, `${originalName} (copia)`);
@@ -730,14 +893,17 @@ function FlowApp(): React.ReactElement {
         await loadSchemas();
       } catch (error) {
         console.error('Error duplicando esquema:', error);
-        alert('Error al duplicar el esquema');
+        try { notifier.notify({ message: 'Error al duplicar el esquema', severity: 'error' }); } catch { /* ignore */ }
       }
     }
-  }, [loadSchemas]);
+  }, [loadSchemas, notifier]);
 
   // Constantes para localStorage
   const STORAGE_KEY = 'drawpak-current-schema';
   const CURRENT_SCHEMA_KEY = 'drawpak-current-schema-id';
+  const CURRENT_SCHEMA_NAME = 'drawpak-current-schema-name';
+  const CURRENT_SCHEMA_DESC = 'drawpak-current-schema-description';
+  const CURRENT_SCHEMA_LOCAL = 'drawpak-current-schema-local';
 
   // Funciones de persistencia
   const saveToLocalStorage = useCallback((currentNodes: Node<ElectNodeData>[], currentEdges: Edge<ElectEdgeData>[], schemaId: string | null = null, schemaName: string = '') => {
@@ -761,8 +927,9 @@ function FlowApp(): React.ReactElement {
         edges: currentEdges,
         timestamp: Date.now(),
         currentSchemaId: schemaId || currentSchemaId,
-        currentSchemaName: schemaName || currentSchemaName,
-        currentSchemaDescription: schemaDescription || '',
+        currentSchemaName: schemaName || currentSchemaName || '',
+        currentSchemaDescription: schemaDescription || currentSchemaDescription || '',
+        currentSchemaLocal: typeof schemaLocal === 'boolean' ? schemaLocal : currentSchemaLocal,
         canvasWidth: canvasWidth,
         canvasHeight: canvasHeight
       };
@@ -772,38 +939,60 @@ function FlowApp(): React.ReactElement {
       // Guardar también el ID del esquema actual por separado
       if (schemaId !== null) {
         localStorage.setItem(CURRENT_SCHEMA_KEY, String(schemaId));
+        localStorage.setItem(CURRENT_SCHEMA_NAME, String(schemaName));
+        localStorage.setItem(CURRENT_SCHEMA_DESC, String(schemaDescription || ''));
+        localStorage.setItem(CURRENT_SCHEMA_LOCAL, String(schemaLocal || false));
       } else {
         localStorage.removeItem(CURRENT_SCHEMA_KEY);
+        localStorage.removeItem(CURRENT_SCHEMA_NAME);
+        localStorage.removeItem(CURRENT_SCHEMA_DESC);
+        localStorage.removeItem(CURRENT_SCHEMA_LOCAL);
       }
 
       setLastSaved(new Date());
     } catch (error) {
       console.error('Error guardando en localStorage:', error);
     }
-  }, [currentSchemaId, currentSchemaName, schemaDescription, reactFlowWrapper]);
+  }, [currentSchemaDescription, currentSchemaId, currentSchemaLocal, currentSchemaName, schemaDescription, schemaLocal]);
 
   const loadFromLocalStorage = useCallback(() => {
     try {
       const savedData = localStorage.getItem(STORAGE_KEY);
       const savedSchemaId = localStorage.getItem(CURRENT_SCHEMA_KEY);
-
+      const savedSchemaName = localStorage.getItem(CURRENT_SCHEMA_NAME);
+      const savedSchemaDesc = localStorage.getItem(CURRENT_SCHEMA_DESC);
+      const savedSchemaLocal = localStorage.getItem(CURRENT_SCHEMA_LOCAL);
       if (savedData) {
         const schemaData = JSON.parse(savedData);
 
         // Establecer el ID del esquema actual si existe
         if (savedSchemaId) {
           setCurrentSchemaId(savedSchemaId);
+          setCurrentSchemaName(savedSchemaName || '');
+          setCurrentSchemaDescription(savedSchemaDesc || '');
+          setCurrentSchemaLocal(savedSchemaLocal === 'false');
         } else if (schemaData.currentSchemaId) {
           setCurrentSchemaId(schemaData.currentSchemaId);
+          setCurrentSchemaName(schemaData.currentSchemaName || '');
+          setCurrentSchemaDescription(schemaData.currentSchemaDescription || '');
+          setCurrentSchemaLocal(typeof schemaData.currentSchemaLocal === 'boolean' ? schemaData.currentSchemaLocal : false);
         }
 
         // Establecer el nombre y la descripción del esquema actual si existen
-        if (schemaData.currentSchemaName) {
-          setCurrentSchemaName(schemaData.currentSchemaName);
+        if (savedSchemaName) {
+          setCurrentSchemaName(savedSchemaName);
         }
-        if (schemaData.currentSchemaDescription) {
-          setSchemaDescription(schemaData.currentSchemaDescription);
+        if (savedSchemaDesc) {
+          setSchemaDescription(savedSchemaDesc);
         }
+        if (savedSchemaLocal) {
+          setSchemaLocal(savedSchemaLocal === 'true');
+        }
+
+        // Determinar valor para currentSchemaLocal en el objeto retornado
+        const resolvedCurrentSchemaLocal = typeof schemaData.currentSchemaLocal === 'boolean'
+          ? schemaData.currentSchemaLocal
+          : (savedSchemaLocal ? savedSchemaLocal === 'true' : false);
 
         return {
           nodes: schemaData.nodes || [],
@@ -811,6 +1000,7 @@ function FlowApp(): React.ReactElement {
           currentSchemaId: savedSchemaId || schemaData.currentSchemaId || null,
           currentSchemaName: schemaData.currentSchemaName || '',
           currentSchemaDescription: schemaData.currentSchemaDescription || '',
+          currentSchemaLocal: resolvedCurrentSchemaLocal,
           canvasWidth: typeof schemaData.canvasWidth === 'number' ? schemaData.canvasWidth : null,
           canvasHeight: typeof schemaData.canvasHeight === 'number' ? schemaData.canvasHeight : null
         };
@@ -818,12 +1008,12 @@ function FlowApp(): React.ReactElement {
     } catch (error) {
       console.error('Error cargando desde localStorage:', error);
     }
-    return { nodes: [], edges: [], currentSchemaId: null, currentSchemaName: '' };
+    return { nodes: [], edges: [], currentSchemaId: null, currentSchemaName: '', currentSchemaLocal: false };
   }, []);
 
   // Cargar esquema al inicializar la aplicación
   React.useEffect(() => {
-    const { nodes: savedNodes, edges: savedEdges, currentSchemaId: savedSchemaId, currentSchemaName: savedSchemaName } = loadFromLocalStorage();
+    const { nodes: savedNodes, edges: savedEdges, currentSchemaId: savedSchemaId, currentSchemaName: savedSchemaName, currentSchemaDescription: savedSchemaDescription, currentSchemaLocal: savedSchemaLocal } = loadFromLocalStorage();
     if (savedNodes.length > 0 || savedEdges.length > 0) {
       setNodes(savedNodes);
       setEdges(savedEdges);
@@ -836,6 +1026,14 @@ function FlowApp(): React.ReactElement {
       // Establecer el nombre del esquema actual si existe
       if (savedSchemaName) {
         setCurrentSchemaName(savedSchemaName);
+      }
+
+      if (savedSchemaDescription) {
+        setCurrentSchemaDescription(savedSchemaDescription);
+      }
+
+      if (typeof savedSchemaLocal === 'boolean') {
+        setCurrentSchemaLocal(savedSchemaLocal);
       }
 
       // Sincronizar el contador de ID con los nodos cargados
@@ -1060,6 +1258,14 @@ function FlowApp(): React.ReactElement {
     // Limpiar el esquema actual
     setCurrentSchemaId(null);
     setCurrentSchemaName('');
+    // Reset schema local flags so the "No guardar en la nube" checkbox is re-enabled
+    try {
+      setCurrentSchemaLocal(false);
+      setSchemaLocal(false);
+      localStorage.removeItem(CURRENT_SCHEMA_LOCAL);
+    } catch {
+      // ignore
+    }
     // Limpiar también el localStorage
     try {
       localStorage.removeItem(STORAGE_KEY);
@@ -1075,20 +1281,16 @@ function FlowApp(): React.ReactElement {
   }, [setNodes, setEdges, setCurrentSchemaId, setCurrentSchemaName]);
 
   const handleNewSchema = useCallback(() => {
-    console.log('handleNewSchema called, current ID:', currentSchemaId);
     if (isHandlingNewSchema) {
       return;
     }
 
     // Solo mostrar confirmación si hay contenido
     if (nodes.length > 0 || edges.length > 0) {
-      console.log('Content exists, showing confirmation dialog');
-      // there is content, show confirmation dialog
+      // Mostrar confirmación si existe contenido
       setShowNewSchemaConfirm(true);
     } else {
-      console.log('No content, clearing directly');
       // Si no hay contenido, limpiar directamente
-      // no content, clearing directly
       handleClearAll();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1201,7 +1403,7 @@ function FlowApp(): React.ReactElement {
 
   // Debug para el diálogo de guardar
   React.useEffect(() => {
-    console.log('showSaveDialog state changed:', showSaveDialog);
+    // showSaveDialog state watcher (no-op in production)
   }, [showSaveDialog]);
 
   // Funciones para manejo de polígonos
@@ -1515,7 +1717,7 @@ function FlowApp(): React.ReactElement {
   // Nueva función de exportación PNG con área seleccionada
   const exportSelectedAreaPNG = useCallback(async () => {
     if (!exportArea || !reactFlowWrapper.current) {
-      alert('Primero selecciona un área para exportar');
+      try { notifier.notify({ message: 'Primero selecciona un área para exportar', severity: 'warning' }); } catch { /* ignore */ }
       return;
     }
 
@@ -1585,13 +1787,13 @@ function FlowApp(): React.ReactElement {
       cancelAreaSelection();
     } catch (error) {
       console.error('Error exporting selected area:', error);
-      alert('Error al exportar el área seleccionada');
+      try { notifier.notify({ message: 'Error al exportar el área seleccionada', severity: 'error' }); } catch { /* ignore */ }
     }
-  }, [exportArea, cancelAreaSelection]);
+  }, [exportArea, cancelAreaSelection, notifier]);
 
   const exportSelectedAreaPDF = useCallback(async () => {
     if (!exportArea || !reactFlowWrapper.current) {
-      alert('Primero selecciona un área para exportar');
+      try { notifier.notify({ message: 'Primero selecciona un área para exportar', severity: 'warning' }); } catch { /* ignore */ }
       return;
     }
 
@@ -1688,15 +1890,15 @@ function FlowApp(): React.ReactElement {
         URL.revokeObjectURL(url);
       } catch (err) {
         console.error('Failed to load jsPDF dynamically', err);
-        alert('No se pudo generar el PDF: librería faltante');
+        try { notifier.notify({ message: 'No se pudo generar el PDF: librería faltante', severity: 'error' }); } catch { /* ignore */ }
       }
 
       cancelAreaSelection();
     } catch (error) {
       console.error('Error exporting selected area to PDF:', error);
-      alert('Error al exportar el área seleccionada a PDF');
+      try { notifier.notify({ message: 'Error al exportar el área seleccionada a PDF', severity: 'error' }); } catch { /* ignore */ }
     }
-  }, [exportArea, exportPDFOrientation, cancelAreaSelection]);
+  }, [exportArea, exportPDFOrientation, cancelAreaSelection, notifier]);
 
   const onNodeDragStop = useCallback((_: React.MouseEvent, node: Node<ElectNodeData>) => {
     // Encontrar una posición libre para el nodo arrastrado
@@ -1738,6 +1940,7 @@ function FlowApp(): React.ReactElement {
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
       <AppBar position="static">
         <Toolbar variant="dense">
+          <Box component="img" src="/logo.svg" alt="DrawPaK logo" sx={{ width: 36, height: 36, mr: 1 }} />
           <IconButton color="inherit" onClick={handleNewSchema} title="Nuevo esquema">
             <span className="material-symbols-rounded">add</span>
           </IconButton>
@@ -1761,9 +1964,6 @@ function FlowApp(): React.ReactElement {
               </Typography>
             )}
           </Typography>
-          <IconButton color="inherit" onClick={copySelectedElements} title="Copiar elementos seleccionados (Ctrl+C)">
-            <span className="material-symbols-rounded">content_copy</span>
-          </IconButton>
           <IconButton color="inherit" onClick={() => { void loadSvgElements(); void loadSvgCategories(); setShowSvgDialog(true); }} title="Elementos SVG">
             <span className="material-symbols-rounded">edit</span>
           </IconButton>
@@ -1794,9 +1994,6 @@ function FlowApp(): React.ReactElement {
           >
             <span className="material-symbols-rounded">polyline</span>
           </IconButton>
-          <IconButton color="inherit" onClick={pasteElements} title="Pegar elementos (Ctrl+V)" disabled={!clipboard || clipboard.nodes.length === 0}>
-            <span className="material-symbols-rounded">content_paste</span>
-          </IconButton>
           {!isSelectingExportArea ? (
             <>
               <IconButton color="inherit" onClick={() => startAreaSelection('png')} title="Seleccionar área para exportar PNG">
@@ -1824,6 +2021,13 @@ function FlowApp(): React.ReactElement {
               </IconButton>
             </>
           )}
+          {/* Username display and logout */}
+          <Typography variant="subtitle2" sx={{ marginLeft: 2, marginRight: 1 }}>
+            {username ? `Usuario: ${username}` : ''}
+          </Typography>
+          <IconButton color="inherit" onClick={() => { void handleLogout(); }} title="Cerrar sesión (borrar datos locales)">
+            <span className="material-symbols-rounded">logout</span>
+          </IconButton>
         </Toolbar>
       </AppBar>
       <Box
@@ -2493,8 +2697,8 @@ function FlowApp(): React.ReactElement {
 
       {/* Diálogo de confirmación para nuevo esquema */}
       <Dialog open={showNewSchemaConfirm} onClose={cancelNewSchema} maxWidth="sm">
-        <DialogTitle>Crear Nuevo Esquema</DialogTitle>
-        <DialogContent>
+        <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#263238', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>Crear Nuevo Esquema</DialogTitle>
+        <DialogContent sx={{mt: 2}}>
           <Typography>
             ¿Estás seguro de que quieres crear un nuevo esquema? Se perderán todos los cambios no guardados.
           </Typography>
@@ -2509,8 +2713,8 @@ function FlowApp(): React.ReactElement {
 
       {/* Diálogo para pedir nombre de usuario (requerido) */}
       <Dialog open={showUsernameDialog} onClose={handleUsernameCancel} maxWidth="xs">
-        <DialogTitle sx={{textAlign: 'center'}}>Nombre de usuario requerido</DialogTitle>
-        <DialogContent>
+        <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#263238', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>Nombre de usuario requerido</DialogTitle>
+        <DialogContent sx={{mt: 2}}>
           <Typography sx={{ mb: 1 }}>Introduce un nombre de usuario alfanumérico (mínimo 6 caracteres).</Typography>
           <TextField
             autoFocus
@@ -2520,18 +2724,19 @@ function FlowApp(): React.ReactElement {
             variant="outlined"
             value={usernameInput}
             onChange={(e) => setUsernameInput(e.target.value.toLowerCase().trim())}
+            onKeyDown={(e) => { if (e.key === 'Enter') { void handleUsernameSave(); } }}
             helperText={usernameInput && !isValidUsername(usernameInput) ? 'Debe ser alfanumérico y al menos 6 caracteres' : ''}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleUsernameSave} variant="contained">Aceptar</Button>
+          <Button onClick={() => { void handleUsernameSave(); }} variant="contained">Aceptar</Button>
         </DialogActions>
       </Dialog>
 
       {/* Diálogo para guardar esquema */}
       <Dialog open={showSaveDialog} onClose={() => setShowSaveDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Guardar Esquema</DialogTitle>
-        <DialogContent>
+        <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#263238', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>Guardar Esquema</DialogTitle>
+        <DialogContent sx={{mt: 2}}>
           <TextField
             autoFocus
             margin="dense"
@@ -2556,7 +2761,13 @@ function FlowApp(): React.ReactElement {
             slotProps={{ inputLabel: { shrink: true } }}
           />
           <FormControlLabel
-            control={<Checkbox checked={schemaLocal} onChange={(e) => setSchemaLocal(e.target.checked)} />}
+            control={
+              <Checkbox
+                checked={schemaLocal}
+                onChange={(e) => setSchemaLocal(e.target.checked)}
+                disabled={Boolean(currentSchemaId || currentSchemaLocal)}
+              />
+            }
             label="No guardar en la nube"
           />
         </DialogContent>
@@ -2570,23 +2781,58 @@ function FlowApp(): React.ReactElement {
 
       {/* Diálogo para cargar esquemas */}
       <Dialog open={showSchemasDialog} onClose={() => setShowSchemasDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Esquemas Guardados</DialogTitle>
-        <DialogContent>
-          <TextField
-            margin="dense"
-            label="Buscar por nombre o descripción"
-            fullWidth
-            variant="outlined"
-            value={schemaSearch}
-            onChange={(e) => setSchemaSearch(e.target.value)}
-            slotProps={{ inputLabel: { shrink: true } }}
-          />
+        <DialogTitle sx={{ textAlign: 'center', backgroundColor: '#263238', color: '#fff', fontSize: 18, fontWeight: 400, padding: '12px 16px' }}>Esquemas Guardados</DialogTitle>
+        <DialogContent sx={{mt: 2}}>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+            <FormControl  sx={{ minWidth: 160 }}>
+              <InputLabel id="schema-filter-label">Mostrar</InputLabel>
+              <Select
+                labelId="schema-filter-label"
+                value={schemaFilter}
+                label="Mostrar"
+                onChange={(e: SelectChangeEvent) => setSchemaFilter(e.target.value as 'activos' | 'eliminados' | 'todos' | 'locales' | 'propios')}
+              >
+                <MenuItem value="activos">Activos</MenuItem>
+                <MenuItem value="eliminados">Eliminados</MenuItem>
+                <MenuItem value="todos">Todos</MenuItem>
+                <MenuItem value="locales">Locales</MenuItem>
+                <MenuItem value="propios">Propios</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              margin="dense"
+              label="Buscar por nombre o descripción"
+              fullWidth
+              variant="outlined"
+              value={schemaSearch}
+              onChange={(e) => setSchemaSearch(e.target.value)}
+              slotProps={{ inputLabel: { shrink: true } }}
+            />
+
+          </Box>
           <List>
             {(() => {
               const q = schemaSearch.trim().toLowerCase();
-              const filtered = q
+              const filteredBySearch = q
                 ? schemas.filter(s => (s.name || '').toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q))
                 : schemas;
+
+              const filtered = filteredBySearch.filter(s => {
+                switch (schemaFilter) {
+                  case 'activos':
+                    return s.hidden !== true;
+                  case 'eliminados':
+                    return s.hidden === true;
+                  case 'todos':
+                    return true;
+                  case 'locales':
+                    return s.local === true;
+                  case 'propios':
+                    return (s.created_by || '') === (username || localStorage.getItem('dp_username') || '');
+                  default:
+                    return true;
+                }
+              });
 
               if (filtered.length === 0) {
                 return (
@@ -2596,66 +2842,88 @@ function FlowApp(): React.ReactElement {
                 );
               }
 
-              return filtered.map((schema) => (
-                <ListItem
-                  key={schema.id}
-                  secondaryAction={(
-                    <>
-                      <IconButton
-                        edge="end"
-                        onClick={() => { void handleLoadSchema(schema); }}
-                        title="Cargar esquema (reemplaza actual)"
-                        sx={{ mr: 1 }}
-                      >
-                        <span className="material-symbols-rounded">edit</span>
-                      </IconButton>
-                      <IconButton
-                        edge="end"
-                        onClick={() => { void handleImportSchema(schema); }}
-                        title="Importar elementos al esquema actual"
-                        sx={{ mr: 1 }}
-                      >
-                        <span className="material-symbols-rounded">merge_type</span>
-                      </IconButton>
-                      <IconButton
-                        edge="end"
-                        onClick={() => { void handleDuplicateSchema(schema.id!, schema.name); }}
-                        title="Duplicar esquema"
-                        sx={{ mr: 1 }}
-                      >
-                        <span className="material-symbols-rounded">content_copy</span>
-                      </IconButton>
-                      <IconButton
-                        edge="end"
-                        onClick={() => { void handleDeleteSchema(schema.id!, schema.name); }}
-                        title="Eliminar esquema"
-                      >
-                        <span className="material-symbols-rounded">delete</span>
-                      </IconButton>
-                    </>
-                  )}
-                >
-                  <ListItemText
-                    primary={schema.name}
-                    secondary={
+              return filtered.map((schema) => {
+                const isLocalSchema = Boolean(schema.local);
+                const isSyncSchema = Boolean(schema.synchronized);
+                const schemaIconName = isLocalSchema ? 'cloud_off' : (isSyncSchema ? 'cloud_done' : 'cloud_alert');
+                const schemaIconColor = isLocalSchema ? theme.palette.error.main : (isSyncSchema ? theme.palette.success.main : theme.palette.warning.main);
+
+                return (
+                  <ListItem
+                    key={schema.id}
+                    secondaryAction={(
                       <>
-                        {schema.description ? <span>{schema.description}<br /></span> : null}
-                        <span>
-                          Creado: {new Date(schema.created_at || '').toLocaleString()} • Usuario: {schema.created_by ?? '—'}
-                        </span>
+                        <IconButton
+                          edge="end"
+                          color='primary'
+                          onClick={() => { void handleLoadSchema(schema); }}
+                          title="Cargar esquema (reemplaza actual)"
+                          sx={{ mr: 1 }}
+                        >
+                          <span className="material-symbols-rounded">edit</span>
+                        </IconButton>
+                        <IconButton
+                          edge="end"
+                          color='primary'
+                          onClick={() => { void handleImportSchema(schema); }}
+                          title="Importar elementos al esquema actual"
+                          sx={{ mr: 1 }}
+                        >
+                          <span className="material-symbols-rounded">merge_type</span>
+                        </IconButton>
+                        <IconButton
+                          edge="end"
+                          color='primary'
+                          onClick={() => { void handleDuplicateSchema(schema.id!, schema.name); }}
+                          title="Duplicar esquema"
+                          sx={{ mr: 1 }}
+                        >
+                          <span className="material-symbols-rounded">content_copy</span>
+                        </IconButton>
+                        {schema.hidden === true ? (
+                          <IconButton
+                            edge="end"
+                            color="success"
+                            onClick={() => { void handleRestoreSchema(schema.id!, schema.name); }}
+                            title="Restaurar esquema"
+                          >
+                            <span className="material-symbols-rounded">restore_from_trash</span>
+                          </IconButton>
+                        ) : (
+                          <IconButton
+                            edge="end"
+                            color='error'
+                            onClick={() => { void handleDeleteSchema(schema.id!, schema.name); }}
+                            title="Eliminar esquema"
+                          >
+                            <span className="material-symbols-rounded">delete</span>
+                          </IconButton>
+                        )}
                       </>
-                    }
-                    secondaryTypographyProps={{
-                      component: 'span',
-                      sx: { whiteSpace: 'pre-line' }
-                    }}
-                  />
-                </ListItem>
-              ));
+                    )}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', mr: 1 }}>
+                      <span className="material-symbols-rounded" style={{ color: schemaIconColor, fontSize: 20 }}>{schemaIconName}</span>
+                    </Box>
+                    <ListItemText
+                      primary={schema.name}
+                      secondary={(
+                        <>
+                          {schema.description ? <Typography component="span" display="block">{schema.description}</Typography> : null}
+                          <Typography component="span" sx={{ whiteSpace: 'pre-line' }}>
+                            Creado: {new Date(schema.created_at || '').toLocaleString()} • Usuario: {schema.created_by ?? '—'}
+                          </Typography>
+                        </>
+                      )}
+                    />
+                  </ListItem>
+                );
+              })
             })()}
           </List>
         </DialogContent>
         <DialogActions>
+          <Button onClick={() => { void handleManualSyncSchemas(); }} color="primary">Sincronizar</Button>
           <Button onClick={() => setShowSchemasDialog(false)}>Cerrar</Button>
         </DialogActions>
       </Dialog>
@@ -2682,6 +2950,7 @@ function FlowApp(): React.ReactElement {
           onSaveSvgElement={handleSaveSvgElement}
         />
       </React.Suspense>
+      {SchemaConfirmDialog}
       <NotifierRenderer />
       <Box sx={{ position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 1200 }}>
         <Typography

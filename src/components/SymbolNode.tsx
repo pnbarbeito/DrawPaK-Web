@@ -27,7 +27,7 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
   React.useEffect(() => {
     if (isDynamicSvg && dynamicSvg && dynamicHandles && !preservedSvgData) {
       setPreservedSvgData({ svg: dynamicSvg, handles: dynamicHandles });
-      //(`💾 Preserving SVG data for ${id}:`, { svgLength: dynamicSvg.length });
+  // preserved initial svg data for dynamic nodes
     }
   }, [isDynamicSvg, dynamicSvg, dynamicHandles, preservedSvgData, id]);
 
@@ -35,20 +35,7 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
   const effectiveSvg = dynamicSvg || preservedSvgData?.svg;
   const effectiveHandles = dynamicHandles || preservedSvgData?.handles;
 
-  // Debug logging detallado
-  /*
-  console.log(`🔍 SymbolNode ${id} render:`, {
-    symbolKey,
-    isDynamicSvg,
-    hasDynamicSvg: !!dynamicSvg,
-    hasEffectiveSvg: !!effectiveSvg,
-    svgLength: effectiveSvg?.length,
-    hasDynamicHandles: !!dynamicHandles,
-    hasEffectiveHandles: !!effectiveHandles,
-    hasPreservedData: !!preservedSvgData,
-    allDataKeys: Object.keys(data)
-  });
-  */
+  // Detailed debug logging removed for production. Keep runtime errors above.
   let size = { w: 48, h: 48 };
   let inlineSvgMarkup: string | undefined;
 
@@ -77,14 +64,7 @@ const SymbolNode: React.FC<SymbolNodeProps> = ({ id, data, selected }) => {
 
   // Usar React.memo para memorizar el SVG y evitar pérdida de datos
   const renderedSymbol = React.useMemo(() => {
-    /*
-    console.log(`🧠 useMemo triggered for ${id}:`, {
-      hasInlineSvg: !!inlineSvgMarkup,
-      hasSymbol: !!symbol,
-      symbolKey,
-      svgPreview: inlineSvgMarkup ? inlineSvgMarkup.substring(0, 100) + '...' : 'none'
-    });
-    */
+    // Removed development useMemo debug logs
     if (inlineSvgMarkup) {
       return (
         <div
