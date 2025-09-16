@@ -18,6 +18,11 @@ Contenido del README
 - Notas de diseño y decisiones importantes
 - Contribuir
 
+English documentation
+---------------------
+If you prefer to read the documentation in English, there is a full translation available: [README.en.md](./README.en.md).
+The link text above is intentionally in English to make it easy for non-Spanish speakers to find the English docs.
+
 
 Requisitos
 - Bun (recomendado): si está disponible en tu entorno, es la opción primaria para instalar dependencias y arrancar scripts (los ejemplos usan `bun`).
@@ -86,9 +91,9 @@ Estructura del proyecto (resumen)
 
   Nota importante sobre la demo
   ---------------------------------
-  La página de prueba es únicamente el frontend estático y NO ejecuta la micro-API PHP del repositorio. Por ello la demo usa únicamente IndexedDB a través de `Dexie` y TODO lo que crees o edites se guardará localmente en el navegador (no se sincroniza con un servidor remoto). Si cierras el navegador o limpias los datos de sitio del navegador, los cambios se perderán.
+  La página de prueba es únicamente el frontend estático y NO ejecuta la micro-API PHP del repositorio. Por ello la demo usa únicamente IndexedDB a través de `Dexie` y TODO lo que crees o edites se guardará localmente en el navegador.
 
-  Si quieres probar la sincronización remota (GET/PUT a `/api/user-library/:username`) debes ejecutar la aplicación localmente y arrancar la micro-API en `public/index.php` (por ejemplo, con PHP embebido o montando `public/` en un servidor que soporte PHP). En el README y la documentación del repo hay instrucciones para desarrollar localmente.
+  Si quieres probar la sincronización remota (GET/PUT a `/api/user-library/:username`) debes ejecutar la aplicación localmente y arrancar la micro-API en `public/index.php` (por ejemplo, con PHP embebido o montando `public/` en un servidor que soporte PHP).
 
 Notas de diseño y decisiones importantes
 - Sincronización de librería de usuario: la app mantiene una `user_library` que puede sincronizarse con la API mediante GET/PUT a `/api/user-library/:username`. Para evitar descargas duplicadas se implementó una caché en memoria para inflight requests.
