@@ -93,3 +93,51 @@ Contributing
 Deployment notes
 - This app includes a PHP micro-API and a local SQLite intended for development/demo. For production you should replace the micro-API with a proper backend (Node/Express, secure PHP, or serverless) and use durable storage for user libraries.
 - If you only need local editing without a backend, the app runs using Dexie (IndexedDB) and does not require the API.
+
+GitHub Pages deployment (frontend-only)
+-------------------------------------
+
+Yes — you can host the frontend of this project on GitHub Pages (static hosting). Important limitations and steps:
+
+What you can publish
+- The built static site in `dist/` (produced by `vite build`).
+- The PHP micro-API in `public/` will NOT run on GitHub Pages because Pages only serves static files. If you rely on the API for sync in production, you must host it separately (e.g. a small VPS, serverless function, or a dedicated PHP host) and point the frontend to that endpoint.
+
+Recommended approach
+1. Add a deploy Vite config (already added in this repo as `vite.config.deploy.ts`) which reads `GH_PAGES_BASE` environment variable as `base`.
+2. Use the provided GitHub Actions workflow `.github/workflows/deploy-gh-pages.yml` to build and publish `dist/` to the `gh-pages` branch.
+
+How it works in this repo
+- `package.json` includes a `deploy` script which runs `tsc -b && vite build -c vite.config.deploy.ts`.
+- The workflow sets `GH_PAGES_BASE` to `/${{ github.repository }}` so Vite builds assets with correct absolute base paths.
+
+Manual steps to test locally
+1. Build locally with the deploy config (fish):
+
+```fish
+GH_PAGES_BASE="/owner/repo/" bun run deploy
+```
+
+Replace `/owner/repo/` with your GitHub repository name (for user/organization pages you can use `/` as base).
+
+2. Serve `dist/` with a static server to check assets (you can use `vite preview` after build):
+
+```fish
+npx serve dist
+# or
+bun run preview
+```
+
+Notes about the backend/API
+- The local PHP micro-API under `public/` (endpoints `/api/*`) is for local development only. If you need server-side sync in production, deploy this API somewhere reachable and update the frontend API base URL (or use a CORS-enabled proxy).
+
+CI / GitHub Actions
+- A workflow `.github/workflows/deploy-gh-pages.yml` is included and will trigger on pushes to `main`/`master`. It installs dependencies, runs `npm run deploy`, and publishes `dist/` to `gh-pages` using a standard action.
+
+Security & privacy
+- If you publish a demo site, ensure you don't commit or publish any sensitive data (for example `public/data.sqlite` may contain sample data—consider removing or regenerating it for a public demo).
+
+If you want, I can:
+- Create the `vite.config.deploy.ts` (already added) and ensure ESLint/TS configs don't complain (we can add a small `tsconfig.deploy.json` or ignore lint for that file).
+- Add a small GitHub Action secret/step to set the correct `GH_PAGES_BASE` more cleanly.
+- Implement adjustments so the repo can publish automatically (e.g., fix ESLint warnings from adding `vite.config.deploy.ts`).

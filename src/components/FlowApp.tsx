@@ -1167,7 +1167,7 @@ function FlowApp(): React.ReactElement {
   // Guardar en historial cuando cambien los nodos o edges (pero no durante undo/redo)
   const lastNodesRef = React.useRef<string>('');
   const lastEdgesRef = React.useRef<string>('');
-  const saveTimeoutRef = React.useRef<number | null>(null);
+  const saveTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   React.useEffect(() => {
     if (isUndoRedoAction) return;
