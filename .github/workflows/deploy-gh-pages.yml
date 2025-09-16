@@ -22,7 +22,7 @@ jobs:
 
       - name: Build for GitHub Pages (with Bun)
         env:
-          GH_PAGES_BASE: "/${{ github.repository }}/"
+          GH_PAGES_BASE: "/DrawPaK-Web/"
         run: bun run deploy
 
       - name: Deploy to gh-pages
