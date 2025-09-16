@@ -1942,8 +1942,19 @@ function FlowApp(): React.ReactElement {
         <Toolbar variant="dense">
           {/* Use Vite base URL so asset works under GitHub Pages subpath */}
           {(() => {
+            // Prefer Vite's BASE_URL at build time, but fall back to the runtime document base
+            // so the app also works when the build used root '/' and is served under a subpath
             const env = (import.meta as unknown) as { env?: Record<string, string | undefined> };
-            const base = env.env?.BASE_URL ?? '/';
+            const viteBase = env.env?.BASE_URL;
+            const runtimeBase = (() => {
+              try {
+                const p = new URL(document.baseURI).pathname;
+                return p.endsWith('/') ? p : p + '/';
+              } catch {
+                return '/';
+              }
+            })();
+            const base = viteBase ?? runtimeBase ?? '/';
             const logoSrc = base + 'logo.svg';
             return <Box component="img" src={logoSrc} alt="DrawPaK logo" sx={{ width: 36, height: 36, mr: 1 }} />;
           })()}
