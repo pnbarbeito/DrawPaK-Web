@@ -1940,7 +1940,13 @@ function FlowApp(): React.ReactElement {
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
       <AppBar position="static">
         <Toolbar variant="dense">
-          <Box component="img" src="/logo.svg" alt="DrawPaK logo" sx={{ width: 36, height: 36, mr: 1 }} />
+          {/* Use Vite base URL so asset works under GitHub Pages subpath */}
+          {(() => {
+            const env = (import.meta as unknown) as { env?: Record<string, string | undefined> };
+            const base = env.env?.BASE_URL ?? '/';
+            const logoSrc = base + 'logo.svg';
+            return <Box component="img" src={logoSrc} alt="DrawPaK logo" sx={{ width: 36, height: 36, mr: 1 }} />;
+          })()}
           <IconButton color="inherit" onClick={handleNewSchema} title="Nuevo esquema">
             <span className="material-symbols-rounded">add</span>
           </IconButton>

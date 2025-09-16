@@ -78,6 +78,18 @@ Estructura del proyecto (resumen)
   - `data.sqlite` – base de datos SQLite usada por la micro-API (se crea/actualiza al ejecutar requests).
   - `logo.svg` – logo de la app (se usa en la barra superior).
 
+  Página de prueba / Demo
+  ---------------------------------
+  Hay una página de prueba pública con la versión estática del frontend en:
+
+  https://pnbarbeito.github.io/DrawPaK-Web/
+
+  Nota importante sobre la demo
+  ---------------------------------
+  La página de prueba es únicamente el frontend estático y NO ejecuta la micro-API PHP del repositorio. Por ello la demo usa únicamente IndexedDB a través de `Dexie` y TODO lo que crees o edites se guardará localmente en el navegador (no se sincroniza con un servidor remoto). Si cierras el navegador o limpias los datos de sitio del navegador, los cambios se perderán.
+
+  Si quieres probar la sincronización remota (GET/PUT a `/api/user-library/:username`) debes ejecutar la aplicación localmente y arrancar la micro-API en `public/index.php` (por ejemplo, con PHP embebido o montando `public/` en un servidor que soporte PHP). En el README y la documentación del repo hay instrucciones para desarrollar localmente.
+
 Notas de diseño y decisiones importantes
 - Sincronización de librería de usuario: la app mantiene una `user_library` que puede sincronizarse con la API mediante GET/PUT a `/api/user-library/:username`. Para evitar descargas duplicadas se implementó una caché en memoria para inflight requests.
 - Guardados agrupados (debounce): al guardar múltiples SVGs o esquemas, la app programa un PUT completo de `user_library` por usuario con debounce (por defecto 2000 ms) para reducir PUTs frecuentes.

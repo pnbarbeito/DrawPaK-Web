@@ -94,6 +94,17 @@ Deployment notes
 - This app includes a PHP micro-API and a local SQLite intended for development/demo. For production you should replace the micro-API with a proper backend (Node/Express, secure PHP, or serverless) and use durable storage for user libraries.
 - If you only need local editing without a backend, the app runs using Dexie (IndexedDB) and does not require the API.
 
+Demo / Test site
+---------------------------------
+There is a public demo site hosting the static frontend at:
+
+https://pnbarbeito.github.io/DrawPaK-Web/
+
+Important note about the demo
+---------------------------------
+The demo site serves only the static frontend and DOES NOT run the repository's PHP micro-API. Therefore the demo uses only IndexedDB via `Dexie` and EVERYTHING you create or edit is stored locally in your browser (it is not synchronized to a remote server). If you close your browser or clear the site's storage, your changes will be lost.
+
+To test the remote synchronization (GET/PUT to `/api/user-library/:username`) run the application locally and start the micro-API in `public/index.php` (for example with the built-in PHP server or by hosting `public/` on a PHP-capable server). Local development instructions are in this README.
 GitHub Pages deployment (frontend-only)
 -------------------------------------
 
