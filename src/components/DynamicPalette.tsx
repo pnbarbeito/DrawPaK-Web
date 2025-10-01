@@ -44,11 +44,14 @@ const DynamicPalette: React.FC<Props> = ({ onDragStart }) => {
       // Si no hay categorías, inicializar con elementos básicos
       if (categories.length === 0) {
         // Dar tiempo a que se inicialicen los elementos básicos
-        setTimeout(async () => {
-          const updatedCategories = await getSvgCategories();
-          if (updatedCategories.length > 0) {
-            void loadElementsForCategories(updatedCategories);
-          }
+        // Avoid passing async function directly to setTimeout (eslint no-misused-promises)
+        setTimeout(() => {
+          void (async () => {
+            const updatedCategories = await getSvgCategories();
+            if (updatedCategories.length > 0) {
+              void loadElementsForCategories(updatedCategories);
+            }
+          })();
         }, 1000);
         return;
       }

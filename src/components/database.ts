@@ -352,17 +352,21 @@ export function scheduleUploadFullUserLibrary(username?: string | null): void {
     }
   } catch { /* ignore */ }
   // schedule
-  _debounceTimers[user] = setTimeout(async () => {
-    try {
-      const ok = await uploadFullUserLibrary(user);
-      if (ok) {
-        try { setLocalLibraryUpdatedAt(user); } catch { /* ignore */ }
+  // schedule a non-async callback that launches an async IIFE to avoid passing
+  // an async function directly to setTimeout (avoids eslint@typescript-eslint/no-misused-promises)
+  _debounceTimers[user] = setTimeout(() => {
+    void (async () => {
+      try {
+        const ok = await uploadFullUserLibrary(user);
+        if (ok) {
+          try { setLocalLibraryUpdatedAt(user); } catch { /* ignore */ }
+        }
+      } catch (err) {
+        console.warn('Debounced uploadFullUserLibrary failed', err);
+      } finally {
+        try { delete _debounceTimers[user]; } catch { /* ignore */ }
       }
-    } catch (err) {
-      console.warn('Debounced uploadFullUserLibrary failed', err);
-    } finally {
-      try { delete _debounceTimers[user]; } catch { /* ignore */ }
-    }
+    })();
   }, UPLOAD_DEBOUNCE_MS) as unknown as number;
 }
 
